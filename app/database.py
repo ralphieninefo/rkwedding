@@ -14,6 +14,13 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def iso_utc(value: datetime) -> str:
+    """Serialize SQLite's naive UTC values unambiguously for the browser."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -137,8 +144,8 @@ def venue_payload(venue: Venue) -> dict[str, object]:
         "website": venue.website,
         "phone": venue.phone,
         "status": venue.status,
-        "sent_at": latest_outreach.sent_at.isoformat() if latest_outreach else None,
-        "responded_at": latest_reply.occurred_at.isoformat() if latest_reply else None,
+        "sent_at": iso_utc(latest_outreach.sent_at) if latest_outreach else None,
+        "responded_at": iso_utc(latest_reply.occurred_at) if latest_reply else None,
         "response_summary": venue.response_summary,
     }
 

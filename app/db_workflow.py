@@ -1,7 +1,7 @@
 """Sheet import, Gmail reconciliation, and concise response synthesis."""
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from email.utils import getaddresses, parseaddr
 import re
 
@@ -23,6 +23,26 @@ def _addresses(value: str) -> set[str]:
 
 def _when(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _is_outgoing(message: GmailMessage, venue_email: str) -> bool:
+    return (
+        "SENT" in message.label_ids
+        and venue_email in _addresses(message.recipients)
+    )
+
+
+def _is_incoming(
+    message: GmailMessage, venue_email: str, known_thread_ids: set[str]
+) -> bool:
+    return (
+        "SENT" not in message.label_ids
+        and "DRAFT" not in message.label_ids
+        and (
+            parseaddr(message.sender)[1].casefold() == venue_email
+            or message.thread_id in known_thread_ids
+        )
+    )
 
 
 async def import_sheet_venues(settings: Settings) -> dict[str, int]:
@@ -88,7 +108,7 @@ async def create_venue_and_optionally_send(
         return {"id": venue_id, "status": "Existing conversation", "sent": False}
 
     result = await gmail.send_message(email, OUTREACH_SUBJECT, OUTREACH_BODY)
-    now = datetime.now().astimezone()
+    now = datetime.now(UTC)
     with SessionLocal() as session:
         venue = session.get(Venue, venue_id)
         assert venue is not None
@@ -173,17 +193,36 @@ async def reconcile_gmail_database(
             f"in:anywhere newer_than:{days}d {{to:{venue_email} from:{venue_email}}}",
             max_results=100,
         )
-        messages = [await gmail.get_message(message_id) for message_id in ids]
+        messages_by_id = {
+            message.message_id: message
+            for message in [await gmail.get_message(message_id) for message_id in ids]
+        }
+        known_thread_ids = {
+            message.thread_id
+            for message in messages_by_id.values()
+            if _is_outgoing(message, venue_email)
+        }
+        with SessionLocal() as session:
+            known_thread_ids.update(
+                session.scalars(
+                    select(Outreach.gmail_thread_id).where(
+                        Outreach.venue_id == venue_id
+                    )
+                ).all()
+            )
+        # A venue employee may reply from a personal address rather than the
+        # public contact address. Once our exact-address outbound message has
+        # established the Gmail thread, ingest replies from that whole thread.
+        for thread_id in known_thread_ids:
+            thread = await gmail.get_thread(thread_id)
+            messages_by_id.update(
+                {message.message_id: message for message in thread.messages}
+            )
+        messages = list(messages_by_id.values())
         messages.sort(key=lambda item: item.received_at)
         for message in messages:
-            outgoing = (
-                "SENT" in message.label_ids
-                and venue_email in _addresses(message.recipients)
-            )
-            incoming = (
-                "SENT" not in message.label_ids
-                and parseaddr(message.sender)[1].casefold() == venue_email
-            )
+            outgoing = _is_outgoing(message, venue_email)
+            incoming = _is_incoming(message, venue_email, known_thread_ids)
             if not outgoing and not incoming:
                 continue
             with SessionLocal() as session:
