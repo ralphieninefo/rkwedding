@@ -48,6 +48,14 @@ class GmailThread:
     messages: list[GmailMessage] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class GmailSendResult:
+    """Identifiers returned after Gmail accepts a sent message."""
+
+    message_id: str
+    thread_id: str
+
+
 def normalize_message(raw: dict[str, Any]) -> GmailMessage:
     """Extract readable text and attachment references from a Gmail message."""
     message_id = raw["id"]
@@ -223,7 +231,9 @@ class GmailClient:
         )
         return data["id"]
 
-    async def send_message(self, recipient: str, subject: str, body: str) -> str:
+    async def send_message(
+        self, recipient: str, subject: str, body: str
+    ) -> GmailSendResult:
         """Send one standalone message; callers must explicitly authorize this path."""
         message = EmailMessage()
         message["To"] = recipient
@@ -235,4 +245,4 @@ class GmailClient:
             f"/users/{self.user_id}/messages/send",
             json={"raw": raw},
         )
-        return data["id"]
+        return GmailSendResult(message_id=data["id"], thread_id=data["threadId"])

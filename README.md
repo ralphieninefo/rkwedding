@@ -4,14 +4,16 @@ An event-driven Python service for venue outreach, Gmail reply processing, PDF q
 
 The model has one bounded job: classify messages and extract explicit quote facts. Application code owns email, state, deduplication, scoring, and approvals. This is intentionally not a continuously running general agent.
 
-## Current milestone: response tracking
+## Current milestone: Sheet-backed control center
 
 - Focused local dashboard at `http://127.0.0.1:8001`
-- Read-only Google OAuth connection from the dashboard
-- Manual scan of recent Gmail threads for replies to sent messages
-- Local SQLite response list; no inbox changes and no automatic sending
+- Google OAuth connection for Gmail read/send and Sheets access
+- The `Venues` tab is the workflow source of truth
+- A row explicitly marked `Ready` sends the fixed Italian inquiry immediately
+- Sent date plus Gmail message/thread IDs are written back to the same row
+- The dashboard displays the live Sheet-backed workflow state
 
-See [read-only Gmail setup](docs/GMAIL_READONLY_SETUP.md). The earlier inference,
+See [Google connection setup](docs/GMAIL_READONLY_SETUP.md). The earlier inference,
 quote-analysis, and workflow prototype remains available at `/analysis`, but it
 is not part of this milestone.
 

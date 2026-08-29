@@ -26,7 +26,7 @@ Raphaël
 OUTREACH_SUBJECT = "Richiesta informazioni matrimonio – Kassia e Raphaël"
 OUTREACH_BODY = """Buongiorno,
 
-mi chiamo Raphaël e sto organizzando il mio matrimonio con la mia futura moglie Kassia, previsto indicativamente tra la fine di settembre e l'inizio di ottobre, per circa 90 invitati.
+mi chiamo Raphaël e sto organizzando il mio matrimonio con la mia futura moglie Kassia, previsto indicativamente tra la fine di settembre e l’inizio di ottobre, per circa 90 invitati.
 
 Siamo interessati alla vostra location e vorremmo ricevere maggiori informazioni sulla disponibilità, sui servizi offerti e sui relativi costi.
 
@@ -49,6 +49,7 @@ class ProcessingResult:
 class OutreachResult:
     status: str
     gmail_id: str | None = None
+    gmail_thread_id: str | None = None
 
 
 class WeddingWorkflow:
@@ -93,30 +94,21 @@ class WeddingWorkflow:
             )
             return OutreachResult("duplicate_skipped")
 
-        if self.settings.auto_send:
-            gmail_id = await self.gmail.send_message(
-                event.email, OUTREACH_SUBJECT, OUTREACH_BODY
-            )
-            result_status = "sent"
-            sheet_status = "Sent"
-        else:
-            gmail_id = await self.gmail.create_draft(
-                event.email, OUTREACH_SUBJECT, OUTREACH_BODY
-            )
-            result_status = "draft_created"
-            sheet_status = "Draft created"
+        sent = await self.gmail.send_message(
+            event.email, OUTREACH_SUBJECT, OUTREACH_BODY
+        )
         updates = {
-            "Status": sheet_status,
-            "Gmail message ID": gmail_id,
+            "Status": "Sent",
+            "Gmail Message ID": sent.message_id,
+            "Gmail Thread ID": sent.thread_id,
+            "Date Inquired": datetime.now(UTC).date().isoformat(),
         }
-        if self.settings.auto_send:
-            updates["Inquiry date"] = datetime.now(UTC).date().isoformat()
         await self.sheets.update_row(
             self.settings.google_venues_sheet,
             event.row_number,
             updates,
         )
-        return OutreachResult(result_status, gmail_id)
+        return OutreachResult("sent", sent.message_id, sent.thread_id)
 
     async def process_notification(
         self, notification: GmailPushNotification
@@ -188,9 +180,11 @@ class WeddingWorkflow:
                         quote.total_price if quote else decision.quoted_price
                     ) or "",
                     "Currency": (quote.currency if quote else decision.currency) or "",
-                    "Last response": now,
-                    "Gmail thread ID": message.thread_id,
-                    "Unresolved questions": "; ".join(decision.unresolved_questions),
+                    "Response Received": "Yes",
+                    "Last Response": now,
+                    "Gmail Thread ID": message.thread_id,
+                    "Response Summary": "; ".join(decision.facts)
+                    or decision.status,
                 },
             )
             if decision.event_type == "quote_received":

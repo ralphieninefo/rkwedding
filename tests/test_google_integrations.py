@@ -7,7 +7,7 @@ from pydantic import SecretStr
 
 from app.config import Settings
 from app.documents import extract_pdf_text
-from app.gmail import normalize_message
+from app.gmail import GmailSendResult, normalize_message
 from app.models import VenueOutreachEvent
 from app.workflow import WeddingWorkflow
 
@@ -58,6 +58,7 @@ class FakeGmail:
     def __init__(self, duplicates: list[str] | None = None) -> None:
         self.duplicates = duplicates or []
         self.drafts: list[tuple[str, str, str]] = []
+        self.sent: list[tuple[str, str, str]] = []
 
     async def search_message_ids(self, query: str, max_results: int = 10) -> list[str]:
         assert "venue@example.com" in query
@@ -74,6 +75,12 @@ class FakeGmail:
     ) -> str:
         self.drafts.append((recipient, subject, body))
         return "draft-1"
+
+    async def send_message(
+        self, recipient: str, subject: str, body: str
+    ) -> GmailSendResult:
+        self.sent.append((recipient, subject, body))
+        return GmailSendResult("message-1", "thread-1")
 
 
 class FakeSheets:
@@ -92,13 +99,12 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_new_venue_creates_draft_without_marking_sent() -> None:
+async def test_ready_venue_sends_and_records_gmail_ids() -> None:
     gmail = FakeGmail()
     sheets = FakeSheets()
     settings = Settings(
         google_access_token=SecretStr("test-google-token"),
         google_spreadsheet_id="sheet-1",
-        auto_send=False,
     )
     workflow = WeddingWorkflow(settings, gmail=gmail, sheets=sheets)  # type: ignore[arg-type]
 
@@ -106,10 +112,13 @@ async def test_new_venue_creates_draft_without_marking_sent() -> None:
         VenueOutreachEvent(row_number=2, venue="Villa Test", email="venue@example.com")
     )
 
-    assert result.status == "draft_created"
-    assert gmail.drafts[0][0] == "venue@example.com"
-    assert sheets.updates[0][2]["Status"] == "Draft created"
-    assert "Inquiry date" not in sheets.updates[0][2]
+    assert result.status == "sent"
+    assert gmail.sent[0][0] == "venue@example.com"
+    assert "l’inizio di ottobre" in gmail.sent[0][2]
+    assert sheets.updates[0][2]["Status"] == "Sent"
+    assert sheets.updates[0][2]["Gmail Message ID"] == "message-1"
+    assert sheets.updates[0][2]["Gmail Thread ID"] == "thread-1"
+    assert sheets.updates[0][2]["Date Inquired"]
 
 
 @pytest.mark.anyio
@@ -127,5 +136,5 @@ async def test_new_venue_skips_existing_conversation() -> None:
     )
 
     assert result.status == "duplicate_skipped"
-    assert not gmail.drafts
+    assert not gmail.sent
     assert sheets.updates[0][2]["Status"] == "Duplicate skipped"

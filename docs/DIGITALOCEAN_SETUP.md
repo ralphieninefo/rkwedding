@@ -22,7 +22,8 @@ Configure these encrypted runtime secrets in App Platform:
 - `GOOGLE_REFRESH_TOKEN`
 - `GOOGLE_PUBSUB_VERIFICATION_TOKEN`
 - `GOOGLE_SHEET_WEBHOOK_TOKEN`
+- `CONTROL_CENTER_PASSWORD`
 
-Configure the model ID, Google client ID, spreadsheet ID, and tab names as ordinary runtime environment values. Keep `AUTO_SEND=false` during verification.
+Configure the model ID, Google client ID, spreadsheet ID, and tab names as ordinary runtime environment values. A `Ready` row is an explicit instruction to send immediately, so never use `Ready` for test rows with real venue addresses.
 
 After deployment, verify `/health`, the dashboard, one redacted inference example, one test Sheet row, and one Pub/Sub test message before connecting real venue email.

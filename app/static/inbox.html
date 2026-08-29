@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Local Gmail response tracker for wedding venue outreach.">
-    <title>Venue Response Tracker</title>
+    <meta name="description" content="Sheet-backed control center for wedding venue outreach.">
+    <title>Wedding Venue Control Center</title>
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="stylesheet" href="/static/inbox.css">
   </head>
@@ -13,9 +13,9 @@
     <div class="ambient ambient-two" aria-hidden="true"></div>
 
     <header class="site-header">
-      <a class="brand" href="/" aria-label="Venue Response Tracker home">
+      <a class="brand" href="/" aria-label="Wedding Venue Control Center home">
         <span class="brand-mark" aria-hidden="true">KR</span>
-        <span><strong>Venue Response Tracker</strong><small>Kassia &amp; Raphaël</small></span>
+        <span><strong>Venue Control Center</strong><small>Kassia &amp; Raphaël</small></span>
       </a>
       <span class="badge badge-muted" id="gmailBadge">
         <span class="status-dot" aria-hidden="true"></span>
@@ -26,35 +26,35 @@
     <main class="page-shell inbox-shell">
       <section class="inbox-hero">
         <div>
-          <p class="eyebrow">Step one · responses only</p>
-          <h1>See who replied.</h1>
-          <p class="hero-description">Connect Gmail read-only, scan recent conversations, and keep a simple list of venue responses. Nothing is sent or modified.</p>
+          <p class="eyebrow">Google Sheet · source of truth</p>
+          <h1>Outreach at a glance.</h1>
+          <p class="hero-description">See every venue, what has been sent, and who has replied. The dashboard reflects the live Venues tab.</p>
         </div>
         <div class="inbox-actions">
-          <a class="button button-secondary connect-button" id="connectButton" href="/auth/google/start">Connect Gmail</a>
-          <button class="button button-primary" id="syncButton" type="button" disabled>Check for replies <span aria-hidden="true">↻</span></button>
+          <a class="button button-secondary connect-button" id="connectButton" href="/auth/google/start">Connect Google</a>
+          <button class="button button-primary" id="syncButton" type="button" disabled>Refresh from Sheet <span aria-hidden="true">↻</span></button>
         </div>
       </section>
 
       <section class="setup-panel" id="setupPanel" hidden>
         <strong>One Google setup file is needed.</strong>
-        <p>Add the downloaded OAuth client file at <code>data/google_client_secret.json</code>. Then refresh this page and connect Gmail.</p>
+        <p>Add the downloaded OAuth client file at <code>data/google_client_secret.json</code>. Then refresh and connect Google. The app requests Gmail read/send plus Sheets access.</p>
       </section>
 
       <section class="summary-grid" aria-label="Response summary">
-        <article class="brief-card"><span class="brief-label">Tracked replies</span><strong id="trackedCount">0</strong><span>venue conversations</span></article>
-        <article class="brief-card"><span class="brief-label">Last check</span><strong class="summary-text" id="lastCheck">Not yet</strong><span id="lastCheckDetail">Connect Gmail to begin</span></article>
-        <article class="brief-card brief-card-accent"><span class="brief-label">Access mode</span><strong class="summary-text">Read only</strong><span>no sending or inbox changes</span></article>
+        <article class="brief-card"><span class="brief-label">Venues</span><strong id="trackedCount">0</strong><span>rows in the master Sheet</span></article>
+        <article class="brief-card"><span class="brief-label">Last refresh</span><strong class="summary-text" id="lastCheck">Not yet</strong><span id="lastCheckDetail">Connect Google to begin</span></article>
+        <article class="brief-card brief-card-accent"><span class="brief-label">Workflow</span><strong class="summary-text">Sheet → Gmail</strong><span>Ready rows authorize sending</span></article>
       </section>
 
       <section class="panel response-panel" aria-labelledby="responsesTitle">
         <div class="panel-heading compact">
-          <div><p class="eyebrow">Recent inbox activity</p><h2 id="responsesTitle">Venue responses</h2></div>
+          <div><p class="eyebrow">Live from the Venues tab</p><h2 id="responsesTitle">Venue outreach</h2></div>
         </div>
-        <div class="tracker-message" id="trackerMessage">Connect Gmail, then check for replies.</div>
+        <div class="tracker-message" id="trackerMessage">Connect Google to load the master Sheet.</div>
         <div class="response-table-wrap" id="responseTableWrap" hidden>
           <table class="response-table">
-            <thead><tr><th>From</th><th>Subject</th><th>Received</th><th>Status</th></tr></thead>
+            <thead><tr><th>Venue</th><th>Location</th><th>Email</th><th>Sent</th><th>Response</th><th>Status</th></tr></thead>
             <tbody id="responseRows"></tbody>
           </table>
         </div>
@@ -62,7 +62,7 @@
     </main>
 
     <footer class="site-footer">
-      <span>Local tracker · Gmail read-only</span>
+      <span>Control center · Google Sheet source of truth</span>
       <a href="/analysis">Earlier analysis prototype ↗</a>
     </footer>
     <script src="/static/inbox.js" defer></script>

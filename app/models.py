@@ -150,8 +150,9 @@ class VenueOutreachEvent(BaseModel):
 
 
 class VenueOutreachReceipt(BaseModel):
-    """Result of safely drafting or sending an initial inquiry."""
+    """Result of sending an initial inquiry or skipping a duplicate."""
 
-    status: Literal["draft_created", "sent", "duplicate_skipped"]
+    status: Literal["sent", "duplicate_skipped"]
     venue: str
     gmail_id: str | None = None
+    gmail_thread_id: str | None = None

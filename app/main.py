@@ -1,11 +1,12 @@
 """FastAPI entrypoint for wedding venue events."""
 
 from pathlib import Path
+import base64
 import secrets
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import SecretStr
 from starlette.concurrency import run_in_threadpool
@@ -32,6 +33,39 @@ app = FastAPI(title="Wedding Venue Agent", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.middleware("http")
+async def protect_hosted_control_center(request: Request, call_next):
+    """Require HTTP Basic auth when a hosted dashboard password is configured."""
+    settings = get_settings()
+    password = settings.control_center_password
+    public_path = request.url.path == "/health" or request.url.path.startswith(
+        "/events/"
+    )
+    if not password or public_path:
+        return await call_next(request)
+
+    authorization = request.headers.get("Authorization", "")
+    authenticated = False
+    if authorization.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+            username, supplied_password = decoded.split(":", 1)
+            authenticated = secrets.compare_digest(
+                username, settings.control_center_username
+            ) and secrets.compare_digest(
+                supplied_password, password.get_secret_value()
+            )
+        except (ValueError, UnicodeDecodeError):
+            authenticated = False
+    if not authenticated:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Control center login required."},
+            headers={"WWW-Authenticate": 'Basic realm="Wedding Venue Control Center"'},
+        )
+    return await call_next(request)
+
+
 @app.get("/", include_in_schema=False)
 async def dashboard() -> FileResponse:
     """Serve the focused Gmail response tracker."""
@@ -51,6 +85,7 @@ async def gmail_status() -> dict[str, bool]:
     return {
         "oauth_setup_ready": oauth_setup_ready(),
         "connected": gmail_connected(),
+        "spreadsheet_configured": bool(get_settings().google_spreadsheet_id),
     }
 
 
@@ -91,6 +126,32 @@ async def tracked_responses() -> dict[str, object]:
     from app.response_tracker import list_responses
 
     return {"responses": await run_in_threadpool(list_responses)}
+
+
+@app.get("/api/venues")
+async def sheet_venues() -> dict[str, object]:
+    """Return the authoritative venue rows from Google Sheets."""
+    from app.google_auth import get_google_access_token
+    from app.sheets import GoogleSheetsClient
+
+    settings = get_settings()
+    if not settings.google_spreadsheet_id:
+        raise HTTPException(status_code=503, detail="Google Sheet is not configured.")
+    try:
+        access_token = await get_google_access_token(settings)
+        client = GoogleSheetsClient(access_token, settings.google_spreadsheet_id)
+        rows = await client.get_rows(settings.google_venues_sheet)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="Connect Google first.") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="Could not read the Google Sheet."
+        ) from exc
+    return {
+        "spreadsheet_id": settings.google_spreadsheet_id,
+        "sheet": settings.google_venues_sheet,
+        "venues": rows,
+    }
 
 
 @app.post("/api/gmail/sync")
@@ -177,6 +238,7 @@ async def handle_new_venue(
         status=result.status,
         venue=event.venue,
         gmail_id=result.gmail_id,
+        gmail_thread_id=result.gmail_thread_id,
     )
 
 

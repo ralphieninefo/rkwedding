@@ -1,0 +1,30 @@
+name: rkwedding
+region: nyc
+services:
+  - name: web
+    github:
+      repo: ralphieninefo/rkwedding
+      branch: main
+      deploy_on_push: true
+    environment_slug: python
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    instance_count: 1
+    run_command: uvicorn app.main:app --host 0.0.0.0 --port 8080
+    http_port: 8080
+    routes:
+      - path: /
+    health_check:
+      http_path: /health
+    envs:
+      - key: GOOGLE_SPREADSHEET_ID
+        value: 1CTQ7ochPaQS3ZMREeWDZDyiRcBw_hqyUN_eyrwbHxS0
+        scope: RUN_TIME
+        type: GENERAL
+      - key: GOOGLE_VENUES_SHEET
+        value: Venues
+        scope: RUN_TIME
+        type: GENERAL
+      - key: CONTROL_CENTER_USERNAME
+        value: raph
+        scope: RUN_TIME
+        type: GENERAL

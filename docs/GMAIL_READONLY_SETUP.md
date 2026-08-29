@@ -1,7 +1,9 @@
-# Connect Gmail to the local response tracker
+# Connect Google to the local control center
 
-This first milestone asks Google for **read-only Gmail access**. It cannot send,
-delete, archive, label, or otherwise change email.
+The control center asks for Gmail read/send access plus Google Sheets access.
+It reads replies, sends the approved outreach when a row is explicitly marked
+`Ready`, and writes workflow state back to the `Venues` tab. It does not delete,
+archive, or label email.
 
 ## One-time Google setup
 
@@ -29,8 +31,8 @@ is ignored by Git.
 ## Connect and scan
 
 Start the local app on port 8001, open <http://127.0.0.1:8001/>, and select
-**Connect Gmail**. After accepting Google's read-only permission, select
-**Check for replies**.
+**Connect Google**. After accepting the permissions, select
+**Refresh from Sheet**.
 
 The tracker scans up to 100 inbox threads from the last 30 days. It records a
 thread only when Gmail shows that you sent a message and a recipient replied

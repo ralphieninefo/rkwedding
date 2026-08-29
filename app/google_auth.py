@@ -9,6 +9,14 @@ async def get_google_access_token(settings: Settings) -> str:
     """Use a local access token or exchange a refresh token in production."""
     if settings.google_access_token:
         return settings.google_access_token.get_secret_value()
+    try:
+        from app.gmail_oauth import load_credentials
+
+        credentials = load_credentials()
+        if credentials.token:
+            return credentials.token
+    except (FileNotFoundError, ValueError):
+        pass
     if not (
         settings.google_client_id
         and settings.google_client_secret

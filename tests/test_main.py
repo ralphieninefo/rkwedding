@@ -4,7 +4,9 @@ import base64
 import json
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
+from app.config import Settings
 from app.main import app
 
 
@@ -15,8 +17,8 @@ def test_dashboard_is_served() -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Venue Response Tracker" in response.text
-    assert "Gmail read-only" in response.text
+    assert "Wedding Venue Control Center" in response.text
+    assert "Google Sheet · source of truth" in response.text
 
 
 def test_old_analysis_dashboard_is_parked() -> None:
@@ -24,6 +26,20 @@ def test_old_analysis_dashboard_is_parked() -> None:
 
     assert response.status_code == 200
     assert "Wedding Venue Desk" in response.text
+
+
+def test_hosted_dashboard_requires_password(monkeypatch) -> None:
+    settings = Settings(
+        control_center_username="raph",
+        control_center_password=SecretStr("test-password"),
+    )
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    denied = client.get("/")
+    allowed = client.get("/", auth=("raph", "test-password"))
+
+    assert denied.status_code == 401
+    assert allowed.status_code == 200
 
 
 def test_gmail_event_returns_placeholder_decision(monkeypatch) -> None:

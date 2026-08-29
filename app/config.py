@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     google_quotes_sheet: str = "Quotes"
     google_system_sheet: str = "System"
     auto_send: bool = False
+    control_center_username: str = "raph"
+    control_center_password: SecretStr | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

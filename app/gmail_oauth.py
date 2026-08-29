@@ -12,7 +12,11 @@ from google_auth_oauthlib.flow import Flow
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 CLIENT_SECRET_PATH = DATA_DIR / "google_client_secret.json"
 TOKEN_PATH = DATA_DIR / "google_token.json"
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/spreadsheets",
+]
 _pending_states: set[str] = set()
 
 
