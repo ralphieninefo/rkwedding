@@ -4,9 +4,19 @@ An event-driven Python service for venue outreach, Gmail reply processing, PDF q
 
 The model has one bounded job: classify messages and extract explicit quote facts. Application code owns email, state, deduplication, scoring, and approvals. This is intentionally not a continuously running general agent.
 
-## What works
+## Current milestone: response tracking
 
-- Local FastAPI dashboard at `http://127.0.0.1:8000`
+- Focused local dashboard at `http://127.0.0.1:8001`
+- Read-only Google OAuth connection from the dashboard
+- Manual scan of recent Gmail threads for replies to sent messages
+- Local SQLite response list; no inbox changes and no automatic sending
+
+See [read-only Gmail setup](docs/GMAIL_READONLY_SETUP.md). The earlier inference,
+quote-analysis, and workflow prototype remains available at `/analysis`, but it
+is not part of this milestone.
+
+## Earlier prototype capabilities
+
 - DigitalOcean Serverless Inference boundary with validated JSON output
 - Deterministic venue ranking at `POST /compare` and in the dashboard
 - New Sheet row webhook with Gmail duplicate checking
@@ -28,10 +38,10 @@ cp .env.example .env
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --env-file .env
+uvicorn app.main:app --reload --env-file .env --port 8001
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000). API documentation is available at `/docs`.
+Open [http://127.0.0.1:8001](http://127.0.0.1:8001). API documentation is available at `/docs`.
 
 Run the test suite:
 
@@ -94,6 +104,9 @@ Sheet quote facts ──> deterministic scoring ──> ranked shortlist ──>
 
 ```text
 app/main.py                     FastAPI routes and local dashboard
+app/gmail_oauth.py              Local read-only Gmail connection
+app/gmail_sync.py               Recent reply detection
+app/response_tracker.py         Local SQLite response store
 app/workflow.py                 Event orchestration and approval boundaries
 app/gmail.py                    Gmail REST and MIME normalization
 app/sheets.py                   Header-aware Sheets REST client

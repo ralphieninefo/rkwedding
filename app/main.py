@@ -4,10 +4,11 @@ from pathlib import Path
 import secrets
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import SecretStr
+from starlette.concurrency import run_in_threadpool
 
 from app.agent import analyze_event
 from app.config import get_settings
@@ -33,8 +34,76 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/", include_in_schema=False)
 async def dashboard() -> FileResponse:
-    """Serve the local wedding venue operations dashboard."""
+    """Serve the focused Gmail response tracker."""
+    return FileResponse(STATIC_DIR / "inbox.html")
+
+
+@app.get("/analysis", include_in_schema=False)
+async def analysis_dashboard() -> FileResponse:
+    """Keep the earlier quote-analysis prototype available but out of the way."""
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/gmail/status")
+async def gmail_status() -> dict[str, bool]:
+    from app.gmail_oauth import gmail_connected, oauth_setup_ready
+
+    return {
+        "oauth_setup_ready": oauth_setup_ready(),
+        "connected": gmail_connected(),
+    }
+
+
+@app.get("/auth/google/start")
+async def start_google_auth(request: Request) -> RedirectResponse:
+    from app.gmail_oauth import authorization_url
+
+    redirect_uri = str(request.url_for("finish_google_auth"))
+    try:
+        url = authorization_url(redirect_uri)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Google OAuth client file has not been added yet.",
+        ) from exc
+    return RedirectResponse(url)
+
+
+@app.get("/auth/google/callback", name="finish_google_auth")
+async def finish_google_auth(
+    request: Request,
+    state: str = Query(),
+) -> RedirectResponse:
+    from app.gmail_oauth import finish_authorization
+
+    redirect_uri = str(request.url_for("finish_google_auth"))
+    await run_in_threadpool(
+        finish_authorization,
+        redirect_uri,
+        str(request.url),
+        state,
+    )
+    return RedirectResponse("/?connected=1")
+
+
+@app.get("/api/responses")
+async def tracked_responses() -> dict[str, object]:
+    from app.response_tracker import list_responses
+
+    return {"responses": await run_in_threadpool(list_responses)}
+
+
+@app.post("/api/gmail/sync")
+async def sync_gmail_responses() -> dict[str, int | str]:
+    from app.gmail_oauth import gmail_connected
+    from app.gmail_sync import sync_recent_responses
+
+    if not gmail_connected():
+        raise HTTPException(status_code=401, detail="Connect Gmail first.")
+    try:
+        return await run_in_threadpool(sync_recent_responses)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
 @app.get("/health")

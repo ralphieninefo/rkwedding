@@ -15,10 +15,27 @@ def test_dashboard_is_served() -> None:
     response = client.get("/")
 
     assert response.status_code == 200
+    assert "Venue Response Tracker" in response.text
+    assert "Gmail read-only" in response.text
+
+
+def test_old_analysis_dashboard_is_parked() -> None:
+    response = client.get("/analysis")
+
+    assert response.status_code == 200
     assert "Wedding Venue Desk" in response.text
 
 
-def test_gmail_event_returns_placeholder_decision() -> None:
+def test_gmail_event_returns_placeholder_decision(monkeypatch) -> None:
+    async def fake_analyze_event(_event):
+        return {
+            "venue": "Villa Test",
+            "event_type": "unprocessed",
+            "status": "received",
+            "recommended_action": "connect_serverless_inference",
+        }
+
+    monkeypatch.setattr("app.main.analyze_event", fake_analyze_event)
     response = client.post(
         "/events/gmail",
         json={

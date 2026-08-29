@@ -1,0 +1,144 @@
+.inbox-shell {
+  min-height: calc(100vh - 150px);
+}
+
+.inbox-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 70px 4px 46px;
+}
+
+.inbox-hero h1 {
+  margin-bottom: 16px;
+}
+
+.inbox-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.connect-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.setup-panel {
+  padding: 18px 22px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(133, 83, 51, 0.18);
+  border-radius: 14px;
+  background: var(--peach-soft);
+  color: #714329;
+}
+
+.setup-panel p {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+
+.setup-panel code {
+  font-size: 12px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.summary-text {
+  font-size: 24px !important;
+}
+
+.response-panel {
+  min-height: 340px;
+  padding: 30px;
+}
+
+.tracker-message {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.response-table-wrap {
+  overflow-x: auto;
+}
+
+.response-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.response-table th,
+.response-table td {
+  padding: 15px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.response-table th {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.response-table td {
+  font-size: 13px;
+}
+
+.sender-cell strong,
+.sender-cell small,
+.subject-cell strong,
+.subject-cell small {
+  display: block;
+}
+
+.sender-cell small,
+.subject-cell small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: var(--sage);
+  color: var(--green-dark);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+@media (max-width: 800px) {
+  .inbox-hero {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-top: 38px;
+  }
+
+  .inbox-actions,
+  .inbox-actions .button {
+    width: 100%;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .response-panel {
+    padding: 22px;
+  }
+}
