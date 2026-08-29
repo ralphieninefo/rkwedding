@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Local operations dashboard for the Kassia and Raphaël wedding venue agent."
+    >
+    <title>Wedding Venue Desk</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Wedding Venue Desk home">
+        <span class="brand-mark" aria-hidden="true">KR</span>
+        <span>
+          <strong>Wedding Venue Desk</strong>
+          <small>Kassia &amp; Raphaël</small>
+        </span>
+      </a>
+
+      <div class="system-badges" aria-label="System status">
+        <span class="badge" id="serverBadge">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="serverStatus">Checking local service</span>
+        </span>
+        <span class="badge badge-muted" id="inferenceBadge">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="inferenceStatus">Checking inference</span>
+        </span>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="hero" aria-labelledby="dashboardTitle">
+        <div class="hero-copy">
+          <p class="eyebrow">Local operations dashboard</p>
+          <h1 id="dashboardTitle">Turn venue replies into clear next steps.</h1>
+          <p class="hero-description">
+            Review a message, structure the quote, and decide what should happen next—without exposing credentials or making commitments.
+          </p>
+        </div>
+        <div class="hero-route" aria-label="Current processing route">
+          <span>Gmail event</span>
+          <b aria-hidden="true">→</b>
+          <span>FastAPI</span>
+          <b aria-hidden="true">→</b>
+          <span class="route-pending">DO inference</span>
+        </div>
+      </section>
+
+      <section class="brief-grid" aria-label="Wedding brief">
+        <article class="brief-card">
+          <span class="brief-label">Guest plan</span>
+          <strong>~90</strong>
+          <span>guests</span>
+        </article>
+        <article class="brief-card">
+          <span class="brief-label">Venue + F&amp;B target</span>
+          <strong>€25–30k</strong>
+          <span>internal, all-in</span>
+        </article>
+        <article class="brief-card">
+          <span class="brief-label">Wedding window</span>
+          <strong>Late Sep</strong>
+          <span>through early Oct</span>
+        </article>
+        <article class="brief-card brief-card-accent">
+          <span class="brief-label">Safety mode</span>
+          <strong>Draft first</strong>
+          <span>approval before action</span>
+        </article>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="panel analyzer-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Reply analyzer</p>
+              <h2>Process a venue message</h2>
+            </div>
+            <span class="step-chip">01</span>
+          </div>
+
+          <form id="analysisForm">
+            <div class="field-row">
+              <label class="field">
+                <span>Venue name</span>
+                <input
+                  id="venue"
+                  name="venue"
+                  type="text"
+                  placeholder="e.g. Villa Test"
+                  autocomplete="organization"
+                  required
+                >
+              </label>
+              <label class="field">
+                <span>Gmail thread ID <em>optional</em></span>
+                <input
+                  id="threadId"
+                  name="threadId"
+                  type="text"
+                  placeholder="Thread reference"
+                  autocomplete="off"
+                >
+              </label>
+            </div>
+
+            <label class="field field-message">
+              <span>Venue reply</span>
+              <textarea
+                id="message"
+                name="message"
+                rows="9"
+                placeholder="Paste the venue's email reply here…"
+                required
+              ></textarea>
+              <small id="characterCount">0 characters</small>
+            </label>
+
+            <div class="form-actions">
+              <button class="button button-primary" id="analyzeButton" type="submit">
+                Analyze reply
+                <span aria-hidden="true">↗</span>
+              </button>
+              <button class="button button-secondary" id="sampleButton" type="button">
+                Load quote example
+              </button>
+              <button class="button button-quiet" id="clearButton" type="button">
+                Clear
+              </button>
+            </div>
+          </form>
+
+          <p class="privacy-note">
+            <span aria-hidden="true">◆</span>
+            This page talks only to the FastAPI service running on your computer.
+          </p>
+        </article>
+
+        <aside class="panel decision-panel" aria-labelledby="decisionTitle">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Agent decision</p>
+              <h2 id="decisionTitle">Structured result</h2>
+            </div>
+            <span class="step-chip">02</span>
+          </div>
+
+          <div class="decision-empty" id="decisionEmpty">
+            <div class="empty-orbit" aria-hidden="true"><span></span></div>
+            <h3>Ready for a reply</h3>
+            <p>Paste a venue message to see its status, quote, and recommended next action.</p>
+          </div>
+
+          <div class="decision-result" id="decisionResult" hidden aria-live="polite">
+            <div class="result-status">
+              <span class="result-icon" id="resultIcon" aria-hidden="true">✓</span>
+              <div>
+                <span>Processing status</span>
+                <strong id="resultStatus">Received</strong>
+              </div>
+            </div>
+
+            <dl class="result-list">
+              <div>
+                <dt>Venue</dt>
+                <dd id="resultVenue">—</dd>
+              </div>
+              <div>
+                <dt>Event</dt>
+                <dd id="resultEvent">—</dd>
+              </div>
+              <div>
+                <dt>Quote</dt>
+                <dd id="resultQuote">Not extracted</dd>
+              </div>
+              <div>
+                <dt>Next action</dt>
+                <dd id="resultAction">—</dd>
+              </div>
+            </dl>
+
+            <div class="result-callout" id="resultCallout">
+              Serverless Inference is not connected yet. This confirms the local UI and event flow are working.
+            </div>
+          </div>
+
+          <div class="decision-error" id="decisionError" hidden role="alert">
+            <strong>Could not reach the local service.</strong>
+            <span id="errorMessage">Start the FastAPI app and try again.</span>
+          </div>
+        </aside>
+      </section>
+
+      <section class="lower-grid">
+        <article class="panel workflow-panel">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Guardrailed workflow</p>
+              <h2>From inbox to viewing</h2>
+            </div>
+          </div>
+          <ol class="workflow-list">
+            <li>
+              <span>1</span>
+              <div><strong>Receive</strong><small>Load the full Gmail thread</small></div>
+            </li>
+            <li>
+              <span>2</span>
+              <div><strong>Understand</strong><small>Extract quote and missing terms</small></div>
+            </li>
+            <li>
+              <span>3</span>
+              <div><strong>Compare</strong><small>Evaluate true all-in value</small></div>
+            </li>
+            <li>
+              <span>4</span>
+              <div><strong>Draft</strong><small>Prepare a safe next response</small></div>
+            </li>
+            <li>
+              <span>5</span>
+              <div><strong>Approve</strong><small>Human confirms commitments</small></div>
+            </li>
+          </ol>
+        </article>
+
+        <article class="panel integration-panel">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Deployment shape</p>
+              <h2>Local now, App Platform next</h2>
+            </div>
+          </div>
+          <div class="integration-stack">
+            <div class="integration-row active">
+              <span class="integration-number">A</span>
+              <div><strong>Browser dashboard</strong><small>Local control surface</small></div>
+              <span class="integration-state">Ready</span>
+            </div>
+            <div class="integration-row active">
+              <span class="integration-number">B</span>
+              <div><strong>FastAPI service</strong><small>Owns workflow and secrets</small></div>
+              <span class="integration-state">Ready</span>
+            </div>
+            <div class="integration-row">
+              <span class="integration-number">C</span>
+              <div><strong>Serverless Inference</strong><small>Model reasoning endpoint</small></div>
+              <span class="integration-state">Next</span>
+            </div>
+            <div class="integration-row">
+              <span class="integration-number">D</span>
+              <div><strong>Gmail + Sheets</strong><small>Event and durable state</small></div>
+              <span class="integration-state">Later</span>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Wedding Venue Desk · local prototype</span>
+      <a href="/docs" target="_blank" rel="noreferrer">API docs ↗</a>
+    </footer>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

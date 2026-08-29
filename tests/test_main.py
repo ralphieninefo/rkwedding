@@ -1,0 +1,63 @@
+"""Smoke tests for the local API and dashboard."""
+
+import base64
+import json
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+
+client = TestClient(app)
+
+
+def test_dashboard_is_served() -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Wedding Venue Desk" in response.text
+
+
+def test_gmail_event_returns_placeholder_decision() -> None:
+    response = client.post(
+        "/events/gmail",
+        json={
+            "venue": "Villa Test",
+            "message": "Il prezzo è €28.000 per 90 persone.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["recommended_action"] == "connect_serverless_inference"
+
+
+def test_gmail_push_decodes_pubsub_message() -> None:
+    notification = json.dumps(
+        {"emailAddress": "wedding@example.com", "historyId": "987654321"}
+    ).encode()
+    encoded = base64.b64encode(notification).decode()
+
+    response = client.post(
+        "/events/gmail/push",
+        json={
+            "message": {"data": encoded, "messageId": "message-1"},
+            "subscription": "projects/example/subscriptions/gmail-push",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "accepted",
+        "email_address": "wedding@example.com",
+        "history_id": "987654321",
+        "next_action": "fetch_gmail_history",
+    }
+
+
+def test_gmail_push_rejects_invalid_data() -> None:
+    response = client.post(
+        "/events/gmail/push",
+        json={"message": {"data": "not-base64"}},
+    )
+
+    assert response.status_code == 400
