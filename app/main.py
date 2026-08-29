@@ -95,13 +95,30 @@ async def start_google_auth(request: Request) -> RedirectResponse:
 
     redirect_uri = str(request.url_for("finish_google_auth"))
     try:
-        url = authorization_url(redirect_uri)
+        url, state, code_verifier = authorization_url(redirect_uri)
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=503,
             detail="Google OAuth client file has not been added yet.",
         ) from exc
-    return RedirectResponse(url)
+    response = RedirectResponse(url)
+    response.set_cookie(
+        "google_oauth_state",
+        state,
+        httponly=True,
+        secure=redirect_uri.startswith("https://"),
+        samesite="lax",
+        max_age=600,
+    )
+    response.set_cookie(
+        "google_oauth_code_verifier",
+        code_verifier,
+        httponly=True,
+        secure=redirect_uri.startswith("https://"),
+        samesite="lax",
+        max_age=600,
+    )
+    return response
 
 
 @app.get("/auth/google/callback", name="finish_google_auth")
@@ -112,13 +129,23 @@ async def finish_google_auth(
     from app.gmail_oauth import finish_authorization
 
     redirect_uri = str(request.url_for("finish_google_auth"))
+    expected_state = request.cookies.get("google_oauth_state")
+    code_verifier = request.cookies.get("google_oauth_code_verifier")
+    if not expected_state or not secrets.compare_digest(state, expected_state):
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state.")
+    if not code_verifier:
+        raise HTTPException(status_code=400, detail="OAuth verifier is missing.")
     await run_in_threadpool(
         finish_authorization,
         redirect_uri,
         str(request.url),
         state,
+        code_verifier,
     )
-    return RedirectResponse("/?connected=1")
+    response = RedirectResponse("/?connected=1")
+    response.delete_cookie("google_oauth_state")
+    response.delete_cookie("google_oauth_code_verifier")
+    return response
 
 
 @app.get("/api/responses")
@@ -165,6 +192,29 @@ async def sync_gmail_responses() -> dict[str, int | str]:
         return await run_in_threadpool(sync_recent_responses)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@app.post("/api/control-center/sync")
+async def sync_control_center() -> dict[str, object]:
+    """Check Gmail replies and write exact-email matches to the Venues Sheet."""
+    from googleapiclient.errors import HttpError
+
+    from app.sheet_response_sync import sync_gmail_responses_to_sheet
+
+    try:
+        return await sync_gmail_responses_to_sheet(get_settings())
+    except HttpError as exc:
+        if exc.resp.status == 403:
+            detail = "Gmail API is unavailable or not enabled."
+        else:
+            detail = "Gmail response check failed."
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="Could not update the Google Sheet."
+        ) from exc
 
 
 @app.get("/health")

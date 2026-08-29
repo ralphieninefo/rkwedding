@@ -17,9 +17,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/spreadsheets",
 ]
-_pending_states: set[str] = set()
-
-
 def oauth_setup_ready() -> bool:
     return CLIENT_SECRET_PATH.is_file()
 
@@ -28,12 +25,11 @@ def gmail_connected() -> bool:
     return TOKEN_PATH.is_file()
 
 
-def authorization_url(redirect_uri: str) -> str:
-    """Create a Google consent URL and remember its one-time state."""
+def authorization_url(redirect_uri: str) -> tuple[str, str, str]:
+    """Create a Google consent URL and its one-time PKCE browser values."""
     if not oauth_setup_ready():
         raise FileNotFoundError(CLIENT_SECRET_PATH)
     state = secrets.token_urlsafe(32)
-    _pending_states.add(state)
     flow = Flow.from_client_secrets_file(
         str(CLIENT_SECRET_PATH), scopes=SCOPES, state=state
     )
@@ -43,20 +39,24 @@ def authorization_url(redirect_uri: str) -> str:
         include_granted_scopes="true",
         prompt="consent",
     )
-    return url
+    if not flow.code_verifier:
+        raise ValueError("Google OAuth did not create a PKCE verifier.")
+    return url, state, flow.code_verifier
 
 
 def finish_authorization(
     redirect_uri: str,
     authorization_response: str,
     state: str,
+    code_verifier: str,
 ) -> None:
     """Exchange Google's callback and store the refreshable token locally."""
-    if state not in _pending_states:
-        raise ValueError("Invalid or expired OAuth state.")
-    _pending_states.remove(state)
     flow = Flow.from_client_secrets_file(
-        str(CLIENT_SECRET_PATH), scopes=SCOPES, state=state
+        str(CLIENT_SECRET_PATH),
+        scopes=SCOPES,
+        state=state,
+        code_verifier=code_verifier,
+        autogenerate_code_verifier=False,
     )
     flow.redirect_uri = redirect_uri
     if redirect_uri.startswith("http://127.0.0.1"):

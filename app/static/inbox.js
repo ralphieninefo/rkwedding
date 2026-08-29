@@ -87,18 +87,21 @@ const checkStatus = async () => {
 
 syncButton.addEventListener("click", async () => {
   syncButton.disabled = true;
-  syncButton.firstChild.textContent = "Refreshing… ";
+  syncButton.firstChild.textContent = "Syncing… ";
   try {
+    const syncResponse = await fetch("/api/control-center/sync", {method: "POST"});
+    const syncResult = await syncResponse.json();
+    if (!syncResponse.ok) throw new Error(syncResult.detail || "Gmail sync failed.");
     const count = await loadVenues();
     lastCheck.textContent = "Just now";
-    lastCheckDetail.textContent = `${count} venue rows loaded`;
+    lastCheckDetail.textContent = `${syncResult.venues_updated} responses matched · ${count} venues`;
   } catch (error) {
     trackerMessage.hidden = false;
     responseTableWrap.hidden = true;
     trackerMessage.textContent = error instanceof Error ? error.message : "Sheet refresh failed.";
   } finally {
     syncButton.disabled = false;
-    syncButton.firstChild.textContent = "Refresh from Sheet ";
+    syncButton.firstChild.textContent = "Sync Gmail + Sheet ";
   }
 });
 

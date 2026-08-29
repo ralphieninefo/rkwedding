@@ -2,10 +2,9 @@ name: rkwedding
 region: nyc
 services:
   - name: web
-    github:
-      repo: ralphieninefo/rkwedding
+    git:
+      repo_clone_url: https://github.com/ralphieninefo/rkwedding.git
       branch: main
-      deploy_on_push: true
     environment_slug: python
     instance_size_slug: apps-s-1vcpu-0.5gb
     instance_count: 1
