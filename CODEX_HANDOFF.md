@@ -10,7 +10,7 @@ Work in this order and do not skip ahead:
    - Inspect the current Git state and preserve existing work.
    - Confirm `.env` and `.venv/` are ignored and no credentials are tracked.
    - Review the existing FastAPI scaffold, prompt policy, tests, and local dashboard.
-   - Do not publish, create a GitHub remote, push, or commit unless I explicitly authorize it.
+   - The GitHub remote is `ralphieninefo/rkwedding`; preserve its history and never force-push.
 
 2. **Architecture**
    - Read `docs/ARCHITECTURE.md` and `prompts/wedding-agent.md`.
@@ -31,7 +31,7 @@ Work in this order and do not skip ahead:
    - Verify read-only access before attempting deployment or mutation.
 
 4. **Backend and Serverless Inference**
-   - Replace the placeholder in `app/agent.py` with a server-side call to `https://inference.do-ai.run`.
+   - Maintain the existing server-side call to `https://inference.do-ai.run`.
    - Load `prompts/wedding-agent.md` as the policy.
    - Produce validated structured output matching the Pydantic decision model.
    - Add timeouts, useful error handling, and tests with mocked HTTP responses.
@@ -55,11 +55,11 @@ At each stage, report what is already complete, what changed, what was verified,
 
 ## Current repository state
 
-- Local Git repository initialized on `main`; no commit or remote has been created.
-- Python 3.12 virtual environment exists at `.venv`.
-- FastAPI API and local dashboard are working.
-- The dashboard is served at `/`; normalized messages are accepted at `POST /events/gmail`.
-- The normalized event endpoint calls DigitalOcean Serverless Inference when a model key and model ID are configured, with a safe placeholder otherwise.
-- The Gmail Pub/Sub endpoint decodes mailbox and history notifications; OAuth/history retrieval is not implemented yet.
-- Google Sheets is not connected yet.
-- `AUTO_SEND=false` and no real secrets are stored in the repository.
+- GitHub repository is connected on `main`.
+- FastAPI and the local dashboard are working, including deterministic venue comparison.
+- DigitalOcean Serverless Inference, structured quote extraction, and validation are implemented.
+- Gmail REST, Pub/Sub history processing, full-thread retrieval, draft creation, and PDF extraction are implemented.
+- Google Sheets REST updates, durable checkpoints, and the Apps Script `Ready` trigger are implemented.
+- Google OAuth refresh is implemented but real credentials have not been configured or tested.
+- `AUTO_SEND=false`; no real secrets are stored in the repository.
+- Next: configure test OAuth credentials, create Gmail Pub/Sub infrastructure, verify one controlled end-to-end flow, then deploy to App Platform with encrypted secrets.

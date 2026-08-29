@@ -56,7 +56,7 @@ class DigitalOceanInferenceClient:
                 },
             ],
             "temperature": 0.1,
-            "max_tokens": 1200,
+            "max_tokens": 2000,
             "stream": False,
         }
 

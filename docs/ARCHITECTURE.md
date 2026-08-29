@@ -24,6 +24,21 @@ Validated structured decision
       +--> Request human approval when required
 ```
 
+Initial outreach is a second event path:
+
+```text
+Venues row changed to Ready
+      |
+      v
+Installable Apps Script trigger
+      |
+      v
+FastAPI duplicate check
+      |
+      +--> Gmail draft (default)
+      +--> Venue row status update
+```
+
 The dashboard is a control and review surface. It never receives cloud credentials and does not call DigitalOcean directly.
 
 ## Component responsibilities
@@ -53,6 +68,13 @@ The dashboard is a control and review surface. It never receives cloud credentia
 
 - Acts as the initial venue CRM and workflow-state store.
 - Tracks contact state, quotes, inclusions, missing information, follow-up dates, and viewing status.
+- Stores Gmail history checkpoints and processed message IDs in the `System` tab.
+
+### Deterministic scoring
+
+- Computes shortlist rankings from explicit price, location, value, availability, quality, and logistics inputs.
+- Uses fixed weights and reports missing fields; the model never chooses the winner.
+- Keeps ranking decisions reproducible and auditable as preferences change.
 
 ### DigitalOcean MCP
 

@@ -1,12 +1,23 @@
 # Wedding Venue Agent
 
-A Python service for event-driven wedding venue outreach, reply analysis, quote tracking, negotiation support, and viewing coordination.
+An event-driven Python service for venue outreach, Gmail reply processing, PDF quote extraction, Google Sheet tracking, and transparent venue comparison.
 
-## Phase 1
+The model has one bounded job: classify messages and extract explicit quote facts. Application code owns email, state, deduplication, scoring, and approvals. This is intentionally not a continuously running general agent.
 
-Phase 1 is a local FastAPI service with a browser dashboard at `http://127.0.0.1:8000`. The dashboard sends normalized Gmail events to `POST /events/gmail` and displays a validated structured decision. When a model access key and model ID are configured, the backend calls DigitalOcean Serverless Inference at `https://inference.do-ai.run/v1/chat/completions`. Without those settings it returns a safe placeholder response.
+## What works
 
-The service also accepts and decodes Google Cloud Pub/Sub envelopes at `POST /events/gmail/push`. Gmail's push payload contains only the mailbox address and a history ID, so Gmail OAuth, `history.list`, complete-thread retrieval, and Sheet updates remain the next integration slice. See `docs/GMAIL_SETUP.md`.
+- Local FastAPI dashboard at `http://127.0.0.1:8000`
+- DigitalOcean Serverless Inference boundary with validated JSON output
+- Deterministic venue ranking at `POST /compare` and in the dashboard
+- New Sheet row webhook with Gmail duplicate checking
+- Draft-only initial outreach by default
+- Gmail Pub/Sub decoding, `history.list` pagination, and durable Sheet checkpoints
+- Full Gmail thread loading and local text extraction from PDF attachments
+- Quote and venue-row updates in Google Sheets
+- Fixed, non-binding acknowledgement drafts for received quotes
+- Server-side Google OAuth refresh support
+
+Nothing sends automatically unless `AUTO_SEND=true`. Quote acknowledgements remain drafts even in the current auto-send mode.
 
 ## Local setup
 
@@ -20,96 +31,88 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --env-file .env
 ```
 
-Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) in a browser.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). API documentation is available at `/docs`.
 
-Check the service directly:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-Send a fake Gmail event:
+Run the test suite:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/events/gmail \
-  -H 'Content-Type: application/json' \
-  -d '{"venue":"Villa Test","message":"Il prezzo è €28.000 per 90 persone."}'
-```
-
-Without inference credentials, the expected safe response is:
-
-```json
-{
-  "venue": "Villa Test",
-  "event_type": "unprocessed",
-  "status": "received",
-  "recommended_action": "connect_serverless_inference",
-  "quoted_price": null,
-  "currency": null
-}
+pytest -q
 ```
 
 ## Configuration
 
-`.env` is ignored by Git and contains only blank placeholders. Never commit model access keys, Google credentials, OAuth tokens, or other secrets.
+Never commit `.env`, OAuth credentials, refresh tokens, or model keys.
 
 ```dotenv
 DIGITALOCEAN_MODEL_ACCESS_KEY=
 DIGITALOCEAN_MODEL_ID=
+
+GOOGLE_PUBSUB_VERIFICATION_TOKEN=
+GOOGLE_SHEET_WEBHOOK_TOKEN=
+GOOGLE_SPREADSHEET_ID=
+
+# Local, short-lived option:
+GOOGLE_ACCESS_TOKEN=
+
+# Durable server-side option for App Platform:
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REFRESH_TOKEN=
+
 AUTO_SEND=false
 ```
 
-Keep `AUTO_SEND=false` while reply classification and drafting are being tested.
+`DIGITALOCEAN_API_TOKEN` is separate: Codex MCP or `doctl` uses it to manage DigitalOcean resources. The running application does not use it. See [DigitalOcean deployment](docs/DIGITALOCEAN_SETUP.md).
 
-The two DigitalOcean credentials have different responsibilities:
+## Tracker tabs
 
-- `DIGITALOCEAN_API_TOKEN` is used by Codex MCP or `doctl` to manage infrastructure. It is not an application setting.
-- `DIGITALOCEAN_MODEL_ACCESS_KEY` is used only by the FastAPI backend to call Serverless Inference.
+Copy `google-apps-script/Code.gs` into the Sheet's Apps Script project and run `setupTrackerTabs()` once. It adds missing tabs without overwriting populated tabs:
 
-## Current event flow
+- `Venues`: contact and current workflow state
+- `Quotes`: append-only normalized quote records
+- `System`: Gmail history checkpoints and processed-message IDs
 
-```text
-Gmail users.watch
-      ↓
-Google Cloud Pub/Sub push
-      ↓
-POST /events/gmail/push
-      ↓
-decode emailAddress + historyId
-      ↓
-NEXT: Gmail history.list + full thread fetch
-      ↓
-POST /events/gmail normalized event
-      ↓
-DigitalOcean Serverless Inference
-      ↓
-validated AgentDecision
-```
+Set a venue row's `Status` to `Ready` to trigger outreach. With the safe default, the backend checks Gmail for an existing conversation, creates one draft, and changes the status to `Draft created`. See [Google and Gmail setup](docs/GMAIL_SETUP.md).
 
-The Pub/Sub endpoint can use a shared URL token during local development:
+## Event flow
 
 ```text
-https://your-app.example/events/gmail/push?token=<GOOGLE_PUBSUB_VERIFICATION_TOKEN>
-```
+Sheet row set to Ready ──> Apps Script ──> FastAPI ──> duplicate check ──> Gmail draft
 
-Use authenticated Pub/Sub push with OIDC before production. Never put Google or DigitalOcean credentials in browser code.
+Gmail users.watch ──> Pub/Sub ──> FastAPI ──> history.list ──> full thread + PDF
+                                                    │
+                                                    v
+                                      Serverless Inference extraction
+                                                    │
+                                                    v
+                                     Sheet update + acknowledgement draft
+
+Sheet quote facts ──> deterministic scoring ──> ranked shortlist ──> human selects visits
+```
 
 ## Repository map
 
 ```text
-app/main.py                 FastAPI application and routes
-app/agent.py                Agent decision boundary
-app/config.py               Environment-backed settings
-app/inference.py            DigitalOcean Serverless Inference client
-app/gmail.py                Gmail integration boundary
-app/sheets.py               Google Sheets integration boundary
-app/models.py               Typed request and response models
-app/static/index.html       Local dashboard structure
-app/static/styles.css       Dashboard visual design
-app/static/app.js           Dashboard interactions
-prompts/wedding-agent.md     Workflow policy and approval rules
-docs/ARCHITECTURE.md         System boundaries and delivery phases
-docs/GMAIL_SETUP.md          Google Cloud and Gmail push setup checklist
-CODEX_HANDOFF.md             Reusable prompt for a new Codex task
-tests/                       API, Pub/Sub, and inference boundary tests
+app/main.py                     FastAPI routes and local dashboard
+app/workflow.py                 Event orchestration and approval boundaries
+app/gmail.py                    Gmail REST and MIME normalization
+app/sheets.py                   Header-aware Sheets REST client
+app/documents.py                Private local PDF text extraction
+app/inference.py                DigitalOcean Serverless Inference client
+app/scoring.py                  Fixed, auditable ranking formula
+app/models.py                   Validated request, quote, and ranking models
+google-apps-script/Code.gs      Sheet trigger and tab setup
+prompts/wedding-agent.md        Extraction and workflow policy
+docs/                           Architecture and setup guides
+tests/                          Unit and API tests
 ```
+
+## Known next steps
+
+- Complete one real Google OAuth consent run and store the refresh token as an App Platform secret.
+- Create the Gmail Pub/Sub topic/subscription and start `users.watch`.
+- Configure a DigitalOcean model access key and verify extraction against real, redacted quotes.
+- Add OCR/vision fallback for scanned PDFs; they are currently flagged for manual review.
+- Add expired-history reconciliation for Gmail checkpoints that fall outside Gmail's available history window.
+- Add Drive upload links if PDFs should be archived outside Gmail.
+- Add Calendar integration only after the ranking and visit-approval flow is verified.

@@ -51,6 +51,7 @@ def test_gmail_push_decodes_pubsub_message() -> None:
         "email_address": "wedding@example.com",
         "history_id": "987654321",
         "next_action": "fetch_gmail_history",
+        "processed_messages": 0,
     }
 
 
@@ -61,3 +62,29 @@ def test_gmail_push_rejects_invalid_data() -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_compare_endpoint_returns_ranked_venues() -> None:
+    response = client.post(
+        "/compare",
+        json={
+            "venues": [
+                {
+                    "venue": "Venue A",
+                    "normalized_all_in_cost": 28_000,
+                    "location_score": 90,
+                    "value_score": 90,
+                },
+                {
+                    "venue": "Venue B",
+                    "normalized_all_in_cost": 38_000,
+                    "location_score": 70,
+                    "value_score": 60,
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["rankings"][0]["venue"] == "Venue A"
+    assert response.json()["scoring_version"] == "v1"

@@ -134,6 +134,23 @@ Return a structured decision containing, at minimum:
   "status": "Negotiating",
   "quoted_price": 28000,
   "currency": "EUR",
+  "quote": {
+    "total_price": 28000,
+    "currency": "EUR",
+    "guest_count": 90,
+    "price_basis": "all-in",
+    "taxes_included": true,
+    "service_fee": null,
+    "deposit": null,
+    "deposit_due": null,
+    "available_dates": [],
+    "inclusions": [],
+    "exclusions": [],
+    "payment_terms": [],
+    "source_file_name": null,
+    "source_file_url": null,
+    "extraction_confidence": 0.9
+  },
   "facts": [],
   "unresolved_questions": [],
   "recommended_action": "request_best_all_in_price",
@@ -142,4 +159,6 @@ Return a structured decision containing, at minimum:
 }
 ```
 
+Use `quote: null` when no quote is present. Keep the legacy `quoted_price` and
+`currency` fields consistent with `quote.total_price` and `quote.currency`.
 If the source material is ambiguous, say so in `unresolved_questions` rather than guessing.

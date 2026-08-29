@@ -11,6 +11,10 @@ const serverBadge = document.querySelector("#serverBadge");
 const serverStatus = document.querySelector("#serverStatus");
 const inferenceBadge = document.querySelector("#inferenceBadge");
 const inferenceStatus = document.querySelector("#inferenceStatus");
+const googleBadge = document.querySelector("#googleBadge");
+const googleStatus = document.querySelector("#googleStatus");
+const comparisonForm = document.querySelector("#comparisonForm");
+const rankingResults = document.querySelector("#rankingResults");
 
 const decisionEmpty = document.querySelector("#decisionEmpty");
 const decisionResult = document.querySelector("#decisionResult");
@@ -55,11 +59,21 @@ const checkHealth = async () => {
       inferenceStatus.textContent = "Inference not configured";
       inferenceBadge.classList.add("badge-muted");
     }
+
+    if (data.google_api === "configured") {
+      googleStatus.textContent = "Google APIs configured";
+      googleBadge.classList.remove("badge-muted", "badge-offline");
+    } else {
+      googleStatus.textContent = "Google OAuth needed";
+      googleBadge.classList.add("badge-muted");
+    }
   } catch (error) {
     serverStatus.textContent = "Local service offline";
     serverBadge.classList.add("badge-offline");
     inferenceStatus.textContent = "Inference unavailable";
     inferenceBadge.classList.add("badge-muted");
+    googleStatus.textContent = "Google unavailable";
+    googleBadge.classList.add("badge-muted");
   }
 };
 
@@ -142,6 +156,51 @@ form.addEventListener("submit", async (event) => {
   } finally {
     analyzeButton.disabled = false;
     analyzeButton.firstChild.textContent = "Analyze reply ";
+  }
+});
+
+comparisonForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const venues = [...document.querySelectorAll(".comparison-row")].map((row) => {
+    const venue = {};
+    row.querySelectorAll("input").forEach((input) => {
+      if (input.value.trim()) {
+        venue[input.dataset.field] = input.type === "number" ? Number(input.value) : input.value.trim();
+      }
+    });
+    return venue;
+  });
+
+  try {
+    const response = await fetch("/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ venues }),
+    });
+    if (!response.ok) throw new Error("Check the comparison values and try again.");
+    const data = await response.json();
+    rankingResults.replaceChildren();
+    data.rankings.forEach((item) => {
+      const card = document.createElement("article");
+      card.className = "ranking-card";
+      const position = document.createElement("span");
+      position.className = "ranking-position";
+      position.textContent = `#${item.rank}`;
+      const detail = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = item.venue;
+      const reasons = document.createElement("small");
+      reasons.textContent = item.reasons.join(" · ");
+      detail.append(name, reasons);
+      const score = document.createElement("b");
+      score.textContent = item.score.toFixed(1);
+      card.append(position, detail, score);
+      rankingResults.append(card);
+    });
+    rankingResults.hidden = false;
+  } catch (error) {
+    rankingResults.textContent = error instanceof Error ? error.message : "Comparison failed.";
+    rankingResults.hidden = false;
   }
 });
 

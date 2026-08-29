@@ -17,7 +17,12 @@ from app.models import (
     GmailEvent,
     GmailPushReceipt,
     PubSubEnvelope,
+    VenueComparisonRequest,
+    VenueComparisonResponse,
+    VenueOutreachEvent,
+    VenueOutreachReceipt,
 )
+from app.scoring import rank_venues
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -46,6 +51,7 @@ async def health() -> dict[str, str]:
             if settings.google_pubsub_verification_token
             else "local_only"
         ),
+        "google_api": "configured" if settings.google_configured else "not_configured",
     }
 
 
@@ -66,17 +72,51 @@ async def handle_gmail_event(event: GmailEvent) -> AgentDecision:
         ) from exc
 
 
+@app.post("/compare", response_model=VenueComparisonResponse)
+async def compare_venues(
+    comparison: VenueComparisonRequest,
+) -> VenueComparisonResponse:
+    """Rank venues with fixed, auditable rules rather than model judgment."""
+    return VenueComparisonResponse(rankings=rank_venues(comparison.venues))
+
+
+@app.post("/events/sheets/venue", response_model=VenueOutreachReceipt)
+async def handle_new_venue(
+    event: VenueOutreachEvent,
+    token: str | None = Query(default=None),
+) -> VenueOutreachReceipt:
+    """Create a safe initial inquiry from a newly ready Sheet row."""
+    settings = get_settings()
+    expected = settings.google_sheet_webhook_token
+    if not expected:
+        raise HTTPException(status_code=503, detail="Sheet webhook token is not configured.")
+    if (
+        token is None
+        or not secrets.compare_digest(token, expected.get_secret_value())
+    ):
+        raise HTTPException(status_code=401, detail="Invalid Sheet webhook token.")
+    if not settings.google_configured:
+        raise HTTPException(status_code=503, detail="Google integration is not configured.")
+    try:
+        from app.workflow import WeddingWorkflow
+
+        workflow = await WeddingWorkflow.create(settings)
+        result = await workflow.process_new_venue(event)
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=503, detail="Google integration failed.") from exc
+    return VenueOutreachReceipt(
+        status=result.status,
+        venue=event.venue,
+        gmail_id=result.gmail_id,
+    )
+
+
 @app.post("/events/gmail/push", response_model=GmailPushReceipt)
 async def handle_gmail_push(
     envelope: PubSubEnvelope,
     token: str | None = Query(default=None),
 ) -> GmailPushReceipt:
-    """Decode a Gmail Pub/Sub notification and queue its next safe step.
-
-    Gmail publishes only an email address and history ID. The next integration
-    slice must call Gmail history.list and fetch the complete thread before
-    sending any content to Serverless Inference.
-    """
+    """Process a Gmail Pub/Sub history notification when Google is configured."""
     expected: SecretStr | None = get_settings().google_pubsub_verification_token
     if expected and (
         token is None
@@ -95,7 +135,32 @@ async def handle_gmail_push(
             detail="Invalid Gmail Pub/Sub message data.",
         ) from exc
 
+    settings = get_settings()
+    if not settings.google_configured:
+        if expected:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Google integration is not configured; Pub/Sub should retry.",
+            )
+        return GmailPushReceipt(
+            email_address=notification.email_address,
+            history_id=notification.history_id,
+        )
+
+    try:
+        from app.workflow import WeddingWorkflow
+
+        workflow = await WeddingWorkflow.create(settings)
+        result = await workflow.process_notification(notification)
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google integration failed; Pub/Sub should retry this event.",
+        ) from exc
+
     return GmailPushReceipt(
         email_address=notification.email_address,
         history_id=notification.history_id,
+        next_action=result.action,
+        processed_messages=result.processed_messages,
     )

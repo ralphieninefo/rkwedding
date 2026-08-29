@@ -32,6 +32,10 @@
           <span class="status-dot" aria-hidden="true"></span>
           <span id="inferenceStatus">Checking inference</span>
         </span>
+        <span class="badge badge-muted" id="googleBadge">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="googleStatus">Checking Google</span>
+        </span>
       </div>
     </header>
 
@@ -198,6 +202,46 @@
         </aside>
       </section>
 
+      <section class="panel comparison-panel" aria-labelledby="comparisonTitle">
+        <div class="panel-heading compact">
+          <div>
+            <p class="eyebrow">Venue shortlist</p>
+            <h2 id="comparisonTitle">Compare the options</h2>
+          </div>
+          <span class="step-chip">03</span>
+        </div>
+        <p class="comparison-intro">Enter scores from 0–100. Price carries 30%; location and value carry 20% each. Missing information is visibly penalized.</p>
+        <form id="comparisonForm">
+          <div class="comparison-table" id="comparisonRows">
+            <div class="comparison-labels" aria-hidden="true">
+              <span>Venue</span><span>All-in €</span><span>Location</span><span>Value</span><span>Available</span><span>Quality</span><span>Logistics</span>
+            </div>
+            <div class="comparison-row">
+              <input aria-label="Venue 1 name" data-field="venue" placeholder="Venue name" required>
+              <input aria-label="Venue 1 all-in cost" data-field="normalized_all_in_cost" type="number" min="0" placeholder="28000">
+              <input aria-label="Venue 1 location score" data-field="location_score" type="number" min="0" max="100" placeholder="0–100">
+              <input aria-label="Venue 1 value score" data-field="value_score" type="number" min="0" max="100" placeholder="0–100">
+              <input aria-label="Venue 1 availability score" data-field="availability_score" type="number" min="0" max="100" placeholder="0–100">
+              <input aria-label="Venue 1 quality score" data-field="quality_score" type="number" min="0" max="100" placeholder="0–100">
+              <input aria-label="Venue 1 logistics score" data-field="logistics_score" type="number" min="0" max="100" placeholder="0–100">
+            </div>
+            <div class="comparison-row">
+              <input aria-label="Venue 2 name" data-field="venue" placeholder="Venue name" required>
+              <input aria-label="Venue 2 all-in cost" data-field="normalized_all_in_cost" type="number" min="0" placeholder="32000">
+              <input aria-label="Venue 2 location score" data-field="location_score" type="number" min="0" max="100" placeholder="0–100">
+              <input aria-label="Venue 2 value score" data-field="value_score" type="number" min="0" max="100" placeholder="0–100">
+              <input aria-label="Venue 2 availability score" data-field="availability_score" type="number" min="0" max="100" placeholder="0–100">
+              <input aria-label="Venue 2 quality score" data-field="quality_score" type="number" min="0" max="100" placeholder="0–100">
+              <input aria-label="Venue 2 logistics score" data-field="logistics_score" type="number" min="0" max="100" placeholder="0–100">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="button button-primary" type="submit">Rank venues <span aria-hidden="true">↗</span></button>
+          </div>
+        </form>
+        <div class="ranking-results" id="rankingResults" hidden aria-live="polite"></div>
+      </section>
+
       <section class="lower-grid">
         <article class="panel workflow-panel">
           <div class="panel-heading compact">
@@ -248,15 +292,15 @@
               <div><strong>FastAPI service</strong><small>Owns workflow and secrets</small></div>
               <span class="integration-state">Ready</span>
             </div>
-            <div class="integration-row">
+            <div class="integration-row active">
               <span class="integration-number">C</span>
               <div><strong>Serverless Inference</strong><small>Model reasoning endpoint</small></div>
-              <span class="integration-state">Next</span>
+              <span class="integration-state">Code ready</span>
             </div>
-            <div class="integration-row">
+            <div class="integration-row active">
               <span class="integration-number">D</span>
               <div><strong>Gmail + Sheets</strong><small>Event and durable state</small></div>
-              <span class="integration-state">Later</span>
+              <span class="integration-state">Needs OAuth</span>
             </div>
           </div>
         </article>

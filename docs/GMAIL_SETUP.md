@@ -1,52 +1,61 @@
-# Gmail Push Setup
+# Google Sheets, Gmail, and Pub/Sub Setup
 
-## What Gmail sends
+The code is ready for Google credentials, but no real account or secret is stored in Git.
 
-Gmail push notifications do not include an email body. A notification contains:
-
-```json
-{
-  "emailAddress": "mailbox@example.com",
-  "historyId": "9876543210"
-}
-```
-
-The application must persist the prior history ID, call Gmail `users.history.list`, identify added messages, and fetch the complete thread before asking the model to reason about a reply.
-
-## Google Cloud setup checklist
+## 1. Prepare Google Cloud
 
 1. Create or select a Google Cloud project.
-2. Enable the Gmail API and Cloud Pub/Sub API.
-3. Configure the OAuth consent screen.
-4. Create OAuth credentials for the wedding mailbox workflow.
-5. Create a Pub/Sub topic in the same project used to call Gmail `users.watch`.
-6. Grant `gmail-api-push@system.gserviceaccount.com` permission to publish to the topic.
-7. Create a push subscription whose endpoint is the deployed App Platform URL:
+2. Enable Gmail API, Google Sheets API, and Cloud Pub/Sub API.
+3. Configure the OAuth consent screen and add the wedding mailbox as a test user if the app is still in testing.
+4. Create an OAuth client for the server-side application.
+5. Complete one consent flow requesting these minimum scopes:
+   - `https://www.googleapis.com/auth/gmail.modify`
+   - `https://www.googleapis.com/auth/gmail.compose`
+   - `https://www.googleapis.com/auth/spreadsheets`
+6. Save the client ID, client secret, and refresh token as private environment values. Never place the client secret or refresh token in Apps Script source or browser JavaScript.
+
+For quick local testing, `GOOGLE_ACCESS_TOKEN` can hold a short-lived token. App Platform should use the refresh-token settings so the backend obtains fresh access tokens server-side.
+
+## 2. Prepare the Sheet
+
+1. Open Extensions → Apps Script in the venue tracker.
+2. Copy in `google-apps-script/Code.gs` and its manifest.
+3. Run `setupTrackerTabs()` once and approve the requested permissions.
+4. In Apps Script Project Settings, add Script Properties:
+   - `WEBHOOK_URL`: the deployed HTTPS URL, without a trailing slash
+   - `WEBHOOK_TOKEN`: the same random value as `GOOGLE_SHEET_WEBHOOK_TOKEN`
+5. Run `installVenueReadyTrigger()` once.
+
+The installable trigger runs as the person who installed it. It only calls the backend when a manually edited `Venues` row changes to `Ready`. Script/API updates do not recursively fire the trigger.
+
+## 3. Configure Gmail push
+
+1. Create a Pub/Sub topic in the same project used for Gmail `users.watch`.
+2. Grant `gmail-api-push@system.gserviceaccount.com` permission to publish to the topic.
+3. Create a push subscription pointing to:
 
    ```text
-   https://<app-host>/events/gmail/push?token=<shared-verification-token>
+   https://<app-host>/events/gmail/push?token=<GOOGLE_PUBSUB_VERIFICATION_TOKEN>
    ```
 
-8. Call Gmail `users.watch` with the fully qualified topic name:
+4. Call Gmail `users.watch` for the wedding mailbox with the fully qualified topic name:
 
    ```text
-   projects/<google-project-id>/topics/<topic-name>
+   projects/<project-id>/topics/<topic-name>
    ```
 
-9. Store the returned starting `historyId` in durable state.
-10. Renew the Gmail watch before its returned expiration time. A scheduled daily renewal is the intended production approach.
+5. Store the returned initial history ID in the `System` tab, or allow the first webhook to establish a baseline.
+6. Renew the watch daily; Gmail watches expire and must be renewed before their returned expiration.
 
-## Next code slice
+Gmail notifications contain only `emailAddress` and `historyId`. The backend uses the previous Sheet checkpoint to call `history.list`, fetches each complete thread, processes each Gmail message ID once, and advances the checkpoint only after successful updates.
 
-The current repository verifies and decodes the push envelope. The next code slice should add:
+## 4. Safety checks before real use
 
-- Google OAuth credential loading and refresh;
-- a durable per-mailbox history ID store;
-- `users.history.list` pagination;
-- complete Gmail thread retrieval and MIME text extraction;
-- duplicate-event protection;
-- normalization into `GmailEvent`;
-- Sheet lookup before inference;
-- draft creation after a validated decision and human-approval check.
+- Leave `AUTO_SEND=false`.
+- Put a test venue and an address you control in the Sheet.
+- Set its status to `Ready` and confirm exactly one Gmail draft appears.
+- Send a reply with a small test PDF and verify a `Quotes` row appears.
+- Confirm the PDF text and extracted price are accurate before testing real venue material.
+- Rotate the webhook tokens if they appear in logs or screenshots.
 
-Do not acknowledge a notification as fully processed until the durable history ID advances successfully. Do not use an in-memory background task as the only production processing mechanism.
+Use authenticated Pub/Sub push with OIDC before production. The shared URL token is a development boundary, not the final security model.

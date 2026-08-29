@@ -14,6 +14,16 @@ class Settings(BaseSettings):
     digitalocean_inference_base_url: str = "https://inference.do-ai.run"
     inference_timeout_seconds: float = 45.0
     google_pubsub_verification_token: SecretStr | None = None
+    google_sheet_webhook_token: SecretStr | None = None
+    google_access_token: SecretStr | None = None
+    google_client_id: str | None = None
+    google_client_secret: SecretStr | None = None
+    google_refresh_token: SecretStr | None = None
+    google_spreadsheet_id: str | None = None
+    google_gmail_user_id: str = "me"
+    google_venues_sheet: str = "Venues"
+    google_quotes_sheet: str = "Quotes"
+    google_system_sheet: str = "System"
     auto_send: bool = False
 
     model_config = SettingsConfigDict(
@@ -26,6 +36,19 @@ class Settings(BaseSettings):
     def inference_configured(self) -> bool:
         """Return whether both required inference settings are present."""
         return bool(self.digitalocean_model_access_key and self.digitalocean_model_id)
+
+    @property
+    def google_configured(self) -> bool:
+        """Return whether the first Google REST integration can run."""
+        refresh_configured = bool(
+            self.google_client_id
+            and self.google_client_secret
+            and self.google_refresh_token
+        )
+        return bool(
+            self.google_spreadsheet_id
+            and (self.google_access_token or refresh_configured)
+        )
 
 
 @lru_cache

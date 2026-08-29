@@ -1,0 +1,131 @@
+"""Tests for Google API normalization and safe outreach behavior."""
+
+import base64
+
+import pytest
+from pydantic import SecretStr
+
+from app.config import Settings
+from app.documents import extract_pdf_text
+from app.gmail import normalize_message
+from app.models import VenueOutreachEvent
+from app.workflow import WeddingWorkflow
+
+
+def websafe(value: str) -> str:
+    return base64.urlsafe_b64encode(value.encode()).decode().rstrip("=")
+
+
+def test_normalize_message_extracts_text_headers_and_pdf() -> None:
+    message = normalize_message(
+        {
+            "id": "message-1",
+            "threadId": "thread-1",
+            "historyId": "101",
+            "payload": {
+                "headers": [
+                    {"name": "From", "value": "Villa <info@villa.example>"},
+                    {"name": "Subject", "value": "Re: Matrimonio"},
+                    {"name": "Message-ID", "value": "<reply@villa.example>"},
+                ],
+                "mimeType": "multipart/mixed",
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "body": {"data": websafe("Preventivo allegato")},
+                    },
+                    {
+                        "mimeType": "application/pdf",
+                        "filename": "quote.pdf",
+                        "body": {"attachmentId": "attachment-1"},
+                    },
+                ],
+            },
+        }
+    )
+
+    assert message.sender == "Villa <info@villa.example>"
+    assert message.body == "Preventivo allegato"
+    assert message.rfc_message_id == "<reply@villa.example>"
+    assert message.attachments[0].filename == "quote.pdf"
+
+
+def test_invalid_pdf_is_left_for_manual_review() -> None:
+    assert extract_pdf_text(b"not a pdf") == ""
+
+
+class FakeGmail:
+    def __init__(self, duplicates: list[str] | None = None) -> None:
+        self.duplicates = duplicates or []
+        self.drafts: list[tuple[str, str, str]] = []
+
+    async def search_message_ids(self, query: str, max_results: int = 10) -> list[str]:
+        assert "venue@example.com" in query
+        return self.duplicates
+
+    async def create_draft(
+        self,
+        recipient: str,
+        subject: str,
+        body: str,
+        thread_id: str | None = None,
+        in_reply_to: str | None = None,
+        references: str | None = None,
+    ) -> str:
+        self.drafts.append((recipient, subject, body))
+        return "draft-1"
+
+
+class FakeSheets:
+    def __init__(self) -> None:
+        self.updates: list[tuple[str, int, dict[str, object]]] = []
+
+    async def update_row(
+        self, sheet_name: str, row_number: int, updates: dict[str, object]
+    ) -> None:
+        self.updates.append((sheet_name, row_number, updates))
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_new_venue_creates_draft_without_marking_sent() -> None:
+    gmail = FakeGmail()
+    sheets = FakeSheets()
+    settings = Settings(
+        google_access_token=SecretStr("test-google-token"),
+        google_spreadsheet_id="sheet-1",
+        auto_send=False,
+    )
+    workflow = WeddingWorkflow(settings, gmail=gmail, sheets=sheets)  # type: ignore[arg-type]
+
+    result = await workflow.process_new_venue(
+        VenueOutreachEvent(row_number=2, venue="Villa Test", email="venue@example.com")
+    )
+
+    assert result.status == "draft_created"
+    assert gmail.drafts[0][0] == "venue@example.com"
+    assert sheets.updates[0][2]["Status"] == "Draft created"
+    assert "Inquiry date" not in sheets.updates[0][2]
+
+
+@pytest.mark.anyio
+async def test_new_venue_skips_existing_conversation() -> None:
+    gmail = FakeGmail(duplicates=["existing-message"])
+    sheets = FakeSheets()
+    settings = Settings(
+        google_access_token=SecretStr("test-google-token"),
+        google_spreadsheet_id="sheet-1",
+    )
+    workflow = WeddingWorkflow(settings, gmail=gmail, sheets=sheets)  # type: ignore[arg-type]
+
+    result = await workflow.process_new_venue(
+        VenueOutreachEvent(row_number=3, venue="Villa Test", email="venue@example.com")
+    )
+
+    assert result.status == "duplicate_skipped"
+    assert not gmail.drafts
+    assert sheets.updates[0][2]["Status"] == "Duplicate skipped"

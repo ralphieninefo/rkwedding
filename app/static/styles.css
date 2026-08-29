@@ -329,8 +329,86 @@ h1 {
 .analyzer-panel,
 .decision-panel,
 .workflow-panel,
-.integration-panel {
+.integration-panel,
+.comparison-panel {
   padding: 30px;
+}
+
+.comparison-panel {
+  margin-top: 14px;
+}
+
+.comparison-intro {
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.comparison-table {
+  display: grid;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.comparison-labels,
+.comparison-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.5fr) repeat(6, minmax(105px, 1fr));
+  gap: 8px;
+  min-width: 920px;
+}
+
+.comparison-labels span {
+  padding-inline: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.comparison-row input {
+  min-height: 44px;
+}
+
+.ranking-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.ranking-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(223, 233, 223, 0.42);
+}
+
+.ranking-position {
+  color: var(--green);
+  font-weight: 850;
+}
+
+.ranking-card strong,
+.ranking-card small {
+  display: block;
+}
+
+.ranking-card small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.ranking-card b {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 24px;
+  font-weight: 500;
 }
 
 .panel-heading {
@@ -837,7 +915,8 @@ textarea:focus {
   .analyzer-panel,
   .decision-panel,
   .workflow-panel,
-  .integration-panel {
+  .integration-panel,
+  .comparison-panel {
     padding: 22px;
   }
 
