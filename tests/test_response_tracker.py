@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import app.response_tracker as response_tracker
-from app.gmail_sync import sync_recent_responses
+from app.gmail_sync import find_recent_responses, sync_recent_responses
 
 
 class FakeRequest:
@@ -100,3 +100,20 @@ def test_sync_ignores_inbound_only_thread(
 
     assert result["responses_tracked"] == 0
     assert response_tracker.list_responses() == []
+
+
+def test_known_venue_sender_is_tracked_in_new_thread() -> None:
+    thread = {
+        "id": "thread-3",
+        "messages": [
+            _message("inbound-2", "Villa <events@villa.test>", 2_000)
+        ],
+    }
+
+    _, _, responses = find_recent_responses(
+        service=FakeService(thread),
+        known_senders={"events@villa.test"},
+    )
+
+    assert len(responses) == 1
+    assert responses[0]["sender_email"] == "events@villa.test"

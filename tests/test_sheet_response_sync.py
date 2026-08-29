@@ -40,7 +40,7 @@ class FakeSheets:
 async def test_response_sync_updates_exact_email_match(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         "app.sheet_response_sync.find_recent_responses",
-        lambda: (
+        lambda *_args, **_kwargs: (
             "couple@example.com",
             3,
             [

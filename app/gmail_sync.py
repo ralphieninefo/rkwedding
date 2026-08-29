@@ -26,6 +26,7 @@ def find_recent_responses(
     days: int = 30,
     max_threads: int = 100,
     service: Any | None = None,
+    known_senders: set[str] | None = None,
 ) -> tuple[str, int, list[dict[str, str]]]:
     """Find outbound Gmail threads followed by an inbound reply."""
     if service is None:
@@ -59,7 +60,9 @@ def find_recent_responses(
             sender_email = parseaddr(headers.get("from", ""))[1].casefold()
             if "SENT" in message.get("labelIds", []) or sender_email == mailbox:
                 sent_seen = True
-            elif sent_seen and sender_email:
+            elif sender_email and (
+                sent_seen or sender_email in (known_senders or set())
+            ):
                 latest_reply = message
         if not latest_reply:
             continue

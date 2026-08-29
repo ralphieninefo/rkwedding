@@ -12,9 +12,6 @@ async def sync_gmail_responses_to_sheet(settings: Settings) -> dict[str, object]
     if not settings.google_spreadsheet_id:
         raise ValueError("Google Sheet is not configured.")
 
-    mailbox, threads_checked, responses = await run_in_threadpool(
-        find_recent_responses
-    )
     access_token = await get_google_access_token(settings)
     sheets = GoogleSheetsClient(access_token, settings.google_spreadsheet_id)
     venues = await sheets.get_rows(settings.google_venues_sheet)
@@ -23,6 +20,13 @@ async def sync_gmail_responses_to_sheet(settings: Settings) -> dict[str, object]
         for row in venues
         if row.get("Email", "").strip()
     }
+    mailbox, threads_checked, responses = await run_in_threadpool(
+        find_recent_responses,
+        30,
+        100,
+        None,
+        set(rows_by_email),
+    )
 
     matched = 0
     unmatched: list[str] = []
