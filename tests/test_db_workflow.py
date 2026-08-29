@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from app.database import iso_utc
+from app.database import iso_utc, sort_venue_payloads
 from app.db_workflow import _fallback_summary, _is_incoming
 from app.gmail import GmailMessage
 
@@ -64,3 +64,19 @@ def test_unrelated_message_is_not_assigned_to_venue() -> None:
 
 def test_sqlite_timestamp_is_serialized_as_utc() -> None:
     assert iso_utc(datetime(2026, 8, 29, 5, 9, 5)).endswith("+00:00")
+
+
+def test_venues_are_ordered_by_latest_response() -> None:
+    venues = [
+        {"name": "No reply", "responded_at": None},
+        {"name": "Older reply", "responded_at": "2026-08-29T10:00:00+00:00"},
+        {"name": "Newest reply", "responded_at": "2026-08-29T12:00:00+00:00"},
+    ]
+
+    ordered = sort_venue_payloads(venues)
+
+    assert [venue["name"] for venue in ordered] == [
+        "Newest reply",
+        "Older reply",
+        "No reply",
+    ]

@@ -152,4 +152,20 @@ def venue_payload(venue: Venue) -> dict[str, object]:
 
 def list_venues(session: Session) -> list[dict[str, object]]:
     venues = session.scalars(select(Venue).order_by(Venue.name)).unique().all()
-    return [venue_payload(venue) for venue in venues]
+    return sort_venue_payloads([venue_payload(venue) for venue in venues])
+
+
+def sort_venue_payloads(
+    venues: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Show newest replies first, with unanswered venues below them."""
+    return sorted(
+        venues,
+        key=lambda venue: (
+            venue["responded_at"] is None,
+            -datetime.fromisoformat(str(venue["responded_at"])).timestamp()
+            if venue["responded_at"]
+            else 0,
+            str(venue["name"]).casefold(),
+        ),
+    )
