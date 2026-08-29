@@ -61,6 +61,55 @@
   padding: 30px;
 }
 
+.venue-form-panel {
+  margin-bottom: 14px;
+  padding: 30px;
+}
+
+.venue-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.venue-form label span {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.venue-form input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--ink);
+  font: inherit;
+}
+
+.venue-form-actions,
+.form-message {
+  grid-column: 1 / -1;
+}
+
+.venue-form-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.form-message {
+  min-height: 20px;
+  margin: 0;
+  color: var(--green-dark);
+  font-size: 13px;
+}
+
 .tracker-message {
   display: grid;
   min-height: 180px;
@@ -135,6 +184,10 @@
   }
 
   .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .venue-form {
     grid-template-columns: 1fr;
   }
 

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Sheet-backed control center for wedding venue outreach.">
+    <meta name="description" content="Private control center for wedding venue outreach.">
     <title>Wedding Venue Control Center</title>
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="stylesheet" href="/static/inbox.css">
@@ -26,14 +26,33 @@
     <main class="page-shell inbox-shell">
       <section class="inbox-hero">
         <div>
-          <p class="eyebrow">Google Sheet · source of truth</p>
+          <p class="eyebrow">Private venue workspace</p>
           <h1>Outreach at a glance.</h1>
-          <p class="hero-description">See every venue, what has been sent, and who has replied. The dashboard reflects the live Venues tab.</p>
+          <p class="hero-description">Add venues, send an inquiry, and see a concise synthesis when they reply.</p>
         </div>
         <div class="inbox-actions">
           <a class="button button-secondary connect-button" id="connectButton" href="/auth/google/start">Connect Google</a>
-          <button class="button button-primary" id="syncButton" type="button" disabled>Sync Gmail + Sheet <span aria-hidden="true">↻</span></button>
+          <button class="button button-secondary" id="addVenueButton" type="button">Add venue</button>
+          <button class="button button-primary" id="syncButton" type="button" disabled>Check Gmail <span aria-hidden="true">↻</span></button>
         </div>
+      </section>
+
+      <section class="panel venue-form-panel" id="venueFormPanel" hidden>
+        <div class="panel-heading compact">
+          <div><p class="eyebrow">New venue</p><h2>Add contact details</h2></div>
+        </div>
+        <form id="venueForm" class="venue-form">
+          <label><span>Venue name</span><input name="name" required autocomplete="organization"></label>
+          <label><span>Location</span><input name="location" autocomplete="address-level2"></label>
+          <label><span>Email</span><input name="email" type="email" required autocomplete="email"></label>
+          <label><span>Website</span><input name="website" type="url" placeholder="https://"></label>
+          <label><span>Phone</span><input name="phone" type="tel" autocomplete="tel"></label>
+          <div class="venue-form-actions">
+            <button class="button button-secondary" type="submit" value="draft">Save venue</button>
+            <button class="button button-primary" type="submit" value="send">Save &amp; send inquiry</button>
+          </div>
+          <p class="form-message" id="venueFormMessage" role="status"></p>
+        </form>
       </section>
 
       <section class="setup-panel" id="setupPanel" hidden>
@@ -42,19 +61,19 @@
       </section>
 
       <section class="summary-grid" aria-label="Response summary">
-        <article class="brief-card"><span class="brief-label">Venues</span><strong id="trackedCount">0</strong><span>rows in the master Sheet</span></article>
+        <article class="brief-card"><span class="brief-label">Venues</span><strong id="trackedCount">0</strong><span>saved in the app</span></article>
         <article class="brief-card"><span class="brief-label">Last refresh</span><strong class="summary-text" id="lastCheck">Not yet</strong><span id="lastCheckDetail">Connect Google to begin</span></article>
-        <article class="brief-card brief-card-accent"><span class="brief-label">Workflow</span><strong class="summary-text">Sheet → Gmail</strong><span>Ready rows authorize sending</span></article>
+        <article class="brief-card brief-card-accent"><span class="brief-label">Workflow</span><strong class="summary-text">App → Gmail</strong><span>Replies synthesized by Kimi</span></article>
       </section>
 
       <section class="panel response-panel" aria-labelledby="responsesTitle">
         <div class="panel-heading compact">
-          <div><p class="eyebrow">Live from the Venues tab</p><h2 id="responsesTitle">Venue outreach</h2></div>
+          <div><p class="eyebrow">Database-backed tracker</p><h2 id="responsesTitle">Venue outreach</h2></div>
         </div>
-        <div class="tracker-message" id="trackerMessage">Connect Google to load the master Sheet.</div>
+        <div class="tracker-message" id="trackerMessage">No venues yet. Add one above.</div>
         <div class="response-table-wrap" id="responseTableWrap" hidden>
           <table class="response-table">
-            <thead><tr><th>Venue</th><th>Location</th><th>Email</th><th>Sent</th><th>Response</th><th>Status</th></tr></thead>
+            <thead><tr><th>Venue</th><th>Contact</th><th>Sent</th><th>Response synthesis</th><th>Status</th></tr></thead>
             <tbody id="responseRows"></tbody>
           </table>
         </div>
@@ -62,7 +81,7 @@
     </main>
 
     <footer class="site-footer">
-      <span>Control center · Google Sheet source of truth</span>
+      <span>Control center · Private app database</span>
       <a href="/analysis">Earlier analysis prototype ↗</a>
     </footer>
     <script src="/static/inbox.js" defer></script>

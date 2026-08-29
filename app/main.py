@@ -3,6 +3,7 @@
 from pathlib import Path
 import base64
 import secrets
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, status
@@ -21,6 +22,7 @@ from app.models import (
     PubSubEnvelope,
     VenueComparisonRequest,
     VenueComparisonResponse,
+    VenueCreate,
     VenueOutreachEvent,
     VenueOutreachReceipt,
 )
@@ -29,7 +31,16 @@ from app.scoring import rank_venues
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-app = FastAPI(title="Wedding Venue Agent", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    from app.database import init_database
+
+    init_database()
+    yield
+
+
+app = FastAPI(title="Wedding Venue Agent", version="0.1.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -157,28 +168,39 @@ async def tracked_responses() -> dict[str, object]:
 
 @app.get("/api/venues")
 async def sheet_venues() -> dict[str, object]:
-    """Return the authoritative venue rows from Google Sheets."""
-    from app.google_auth import get_google_access_token
-    from app.sheets import GoogleSheetsClient
+    """Return database-backed venue status without exposing full email bodies."""
+    from app.database import SessionLocal, list_venues
 
-    settings = get_settings()
-    if not settings.google_spreadsheet_id:
-        raise HTTPException(status_code=503, detail="Google Sheet is not configured.")
+    with SessionLocal() as session:
+        return {"venues": list_venues(session)}
+
+
+@app.post("/api/venues")
+async def create_venue(venue: VenueCreate) -> dict[str, object]:
+    """Save a venue and send only when the user explicitly requests it."""
+    from app.db_workflow import create_venue_and_optionally_send
+
     try:
-        access_token = await get_google_access_token(settings)
-        client = GoogleSheetsClient(access_token, settings.google_spreadsheet_id)
-        rows = await client.get_rows(settings.google_venues_sheet)
+        return await create_venue_and_optionally_send(
+            get_settings(), **venue.model_dump()
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="Connect Google before sending.") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Gmail could not send the inquiry.") from exc
+
+
+@app.post("/api/import/sheet")
+async def import_existing_sheet() -> dict[str, int]:
+    """Copy valid venue contacts into the database; never modify the Sheet."""
+    from app.db_workflow import import_sheet_venues
+
+    try:
+        return await import_sheet_venues(get_settings())
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="Connect Google first.") from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(
-            status_code=502, detail="Could not read the Google Sheet."
-        ) from exc
-    return {
-        "spreadsheet_id": settings.google_spreadsheet_id,
-        "sheet": settings.google_venues_sheet,
-        "venues": rows,
-    }
+        raise HTTPException(status_code=502, detail="Could not read the venue Sheet.") from exc
 
 
 @app.post("/api/gmail/sync")
@@ -196,13 +218,13 @@ async def sync_gmail_responses() -> dict[str, int | str]:
 
 @app.post("/api/control-center/sync")
 async def sync_control_center() -> dict[str, object]:
-    """Check Gmail replies and write exact-email matches to the Venues Sheet."""
+    """Reconcile Gmail into the database and synthesize new replies."""
     from googleapiclient.errors import HttpError
 
-    from app.sheet_response_sync import sync_gmail_responses_to_sheet
+    from app.db_workflow import reconcile_gmail_database
 
     try:
-        return await sync_gmail_responses_to_sheet(get_settings())
+        return await reconcile_gmail_database(get_settings())
     except HttpError as exc:
         if exc.resp.status == 403:
             detail = "Gmail API is unavailable or not enabled."
@@ -213,7 +235,31 @@ async def sync_control_center() -> dict[str, object]:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(
-            status_code=502, detail="Could not update the Google Sheet."
+            status_code=502, detail="Could not reconcile Gmail."
+        ) from exc
+
+
+@app.post("/events/reconcile")
+async def scheduled_reconciliation(
+    token: str | None = Query(default=None),
+) -> dict[str, object]:
+    """Run the same reconciliation from a private scheduled webhook."""
+    settings = get_settings()
+    expected = settings.google_sheet_webhook_token
+    if not expected:
+        raise HTTPException(status_code=503, detail="Reconciliation token is not configured.")
+    if token is None or not secrets.compare_digest(token, expected.get_secret_value()):
+        raise HTTPException(status_code=401, detail="Invalid reconciliation token.")
+    if not settings.google_configured:
+        raise HTTPException(status_code=503, detail="Google integration is not configured.")
+    try:
+        from app.db_workflow import reconcile_gmail_database
+
+        return await reconcile_gmail_database(settings)
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Reconciliation failed and will be retried by the scheduler.",
         ) from exc
 
 

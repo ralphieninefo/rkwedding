@@ -1,35 +1,28 @@
-# Wedding Venue Agent
+# Wedding Venue Control Center
 
-An event-driven Python service for venue outreach, Gmail reply processing, PDF quote extraction, Google Sheet tracking, and transparent venue comparison.
+A private FastAPI dashboard for managing wedding-venue outreach without manually tracking Gmail threads.
 
-The model has one bounded job: classify messages and extract explicit quote facts. Application code owns email, state, deduplication, scoring, and approvals. This is intentionally not a continuously running general agent.
+## Current workflow
 
-## Current milestone: Sheet-backed control center
+1. Add a venue in the dashboard.
+2. Choose **Save draft** or **Save & send inquiry**. Sending only happens after the explicit send action.
+3. Use **Check Gmail** to reconcile sent messages and replies.
+4. The application stores the complete message privately, asks DigitalOcean Serverless Inference for a short synthesis, and displays only that synthesis in the dashboard.
 
-- Focused local dashboard at `http://127.0.0.1:8001`
-- Google OAuth connection for Gmail read/send and Sheets access
-- The `Venues` tab is the workflow source of truth
-- A row explicitly marked `Ready` sends the fixed Italian inquiry immediately
-- Sent date plus Gmail message/thread IDs are written back to the same row
-- The dashboard displays the live Sheet-backed workflow state
+The application database is the source of truth. The existing Google Sheet can be imported once to seed venues, but it no longer controls the workflow.
 
-See [Google connection setup](docs/GMAIL_READONLY_SETUP.md). The earlier inference,
-quote-analysis, and workflow prototype remains available at `/analysis`, but it
-is not part of this milestone.
+## What is implemented
 
-## Earlier prototype capabilities
+- Venue form with name, location, email, website, and phone
+- Explicit draft/save-and-send actions
+- Exact-email Gmail matching and idempotent message ingestion
+- Sent and responded status tracking
+- Focused Kimi response synthesis through DigitalOcean Serverless Inference
+- Full email bodies stored in the database but excluded from dashboard/API venue responses
+- SQLite for local development and PostgreSQL-compatible production storage
+- Optional one-time import from the existing `Venues` Sheet
 
-- DigitalOcean Serverless Inference boundary with validated JSON output
-- Deterministic venue ranking at `POST /compare` and in the dashboard
-- New Sheet row webhook with Gmail duplicate checking
-- Draft-only initial outreach by default
-- Gmail Pub/Sub decoding, `history.list` pagination, and durable Sheet checkpoints
-- Full Gmail thread loading and local text extraction from PDF attachments
-- Quote and venue-row updates in Google Sheets
-- Fixed, non-binding acknowledgement drafts for received quotes
-- Server-side Google OAuth refresh support
-
-Nothing sends automatically unless `AUTO_SEND=true`. Quote acknowledgements remain drafts even in the current auto-send mode.
+PDF quote extraction is the next layer. The current milestone tracks and summarizes email replies; it does not yet write structured PDF pricing into the database.
 
 ## Local setup
 
@@ -43,9 +36,9 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --env-file .env --port 8001
 ```
 
-Open [http://127.0.0.1:8001](http://127.0.0.1:8001). API documentation is available at `/docs`.
+Open [http://127.0.0.1:8001](http://127.0.0.1:8001). API documentation is at `/docs`.
 
-Run the test suite:
+To test:
 
 ```bash
 pytest -q
@@ -53,81 +46,64 @@ pytest -q
 
 ## Configuration
 
-Never commit `.env`, OAuth credentials, refresh tokens, or model keys.
+Copy `.env.example` to `.env` and enter credentials locally. Never commit `.env`, OAuth client JSON, refresh tokens, model keys, or the local `data/` directory.
+
+Key settings:
 
 ```dotenv
+# Local default. App Platform should use a managed PostgreSQL connection URL.
+DATABASE_URL=sqlite:///data/wedding.db
+
 DIGITALOCEAN_MODEL_ACCESS_KEY=
 DIGITALOCEAN_MODEL_ID=
+DIGITALOCEAN_INFERENCE_BASE_URL=https://inference.do-ai.run
 
-GOOGLE_PUBSUB_VERIFICATION_TOKEN=
-GOOGLE_SHEET_WEBHOOK_TOKEN=
-GOOGLE_SPREADSHEET_ID=
-
-# Local, short-lived option:
-GOOGLE_ACCESS_TOKEN=
-
-# Durable server-side option for App Platform:
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REFRESH_TOKEN=
+GOOGLE_SPREADSHEET_ID=
+GOOGLE_VENUES_SHEET=Venues
 
+# Keep disabled while testing.
 AUTO_SEND=false
 ```
 
-`DIGITALOCEAN_API_TOKEN` is separate: Codex MCP or `doctl` uses it to manage DigitalOcean resources. The running application does not use it. See [DigitalOcean deployment](docs/DIGITALOCEAN_SETUP.md).
+The model access-key name shown in DigitalOcean is not the model ID. Use the exact model identifier supported by the inference endpoint.
 
-## Tracker tabs
+`DIGITALOCEAN_API_TOKEN` is separate. It is used by `doctl` or development tooling to manage DigitalOcean resources; the running wedding application does not need it.
 
-Copy `google-apps-script/Code.gs` into the Sheet's Apps Script project and run `setupTrackerTabs()` once. It adds missing tabs without overwriting populated tabs:
-
-- `Venues`: contact and current workflow state
-- `Quotes`: append-only normalized quote records
-- `System`: Gmail history checkpoints and processed-message IDs
-
-Set a venue row's `Status` to `Ready` to trigger outreach. With the safe default, the backend checks Gmail for an existing conversation, creates one draft, and changes the status to `Draft created`. See [Google and Gmail setup](docs/GMAIL_SETUP.md).
-
-## Event flow
+## Architecture
 
 ```text
-Sheet row set to Ready ──> Apps Script ──> FastAPI ──> duplicate check ──> Gmail draft
-
-Gmail users.watch ──> Pub/Sub ──> FastAPI ──> history.list ──> full thread + PDF
-                                                    │
-                                                    v
-                                      Serverless Inference extraction
-                                                    │
-                                                    v
-                                     Sheet update + acknowledgement draft
-
-Sheet quote facts ──> deterministic scoring ──> ranked shortlist ──> human selects visits
+Dashboard ──> FastAPI ──> SQLite locally / PostgreSQL in production
+                    │
+                    ├──> Gmail API: send and reconcile messages
+                    │
+                    ├──> Serverless Inference: concise reply synthesis
+                    │
+                    └──> Google Sheets: optional one-time venue import
 ```
+
+Application code owns sending rules, state, matching, and deduplication. Kimi has one bounded job: convert a reply into a concise summary and status. This does not require a general-purpose autonomous agent.
 
 ## Repository map
 
 ```text
-app/main.py                     FastAPI routes and local dashboard
-app/gmail_oauth.py              Local read-only Gmail connection
-app/gmail_sync.py               Recent reply detection
-app/response_tracker.py         Local SQLite response store
-app/workflow.py                 Event orchestration and approval boundaries
-app/gmail.py                    Gmail REST and MIME normalization
-app/sheets.py                   Header-aware Sheets REST client
-app/documents.py                Private local PDF text extraction
-app/inference.py                DigitalOcean Serverless Inference client
-app/scoring.py                  Fixed, auditable ranking formula
-app/models.py                   Validated request, quote, and ranking models
-google-apps-script/Code.gs      Sheet trigger and tab setup
-prompts/wedding-agent.md        Extraction and workflow policy
-docs/                           Architecture and setup guides
-tests/                          Unit and API tests
+app/main.py              FastAPI routes and dashboard entry point
+app/database.py          Venue, outreach, and message persistence
+app/db_workflow.py       Save/send and Gmail reconciliation workflow
+app/gmail_oauth.py       Google OAuth connection
+app/gmail.py             Gmail API and message normalization
+app/inference.py         DigitalOcean reply synthesis
+app/sheets.py            Optional Google Sheet import client
+app/static/              Private control-center interface
+tests/                   Unit and API tests
 ```
 
-## Known next steps
+## Production next steps
 
-- Complete one real Google OAuth consent run and store the refresh token as an App Platform secret.
-- Create the Gmail Pub/Sub topic/subscription and start `users.watch`.
-- Configure a DigitalOcean model access key and verify extraction against real, redacted quotes.
-- Add OCR/vision fallback for scanned PDFs; they are currently flagged for manual review.
-- Add expired-history reconciliation for Gmail checkpoints that fall outside Gmail's available history window.
-- Add Drive upload links if PDFs should be archived outside Gmail.
-- Add Calendar integration only after the ranking and visit-approval flow is verified.
+1. Provision DigitalOcean Managed PostgreSQL and set `DATABASE_URL` as an App Platform secret.
+2. Deploy this version of the app and configure Google OAuth secrets for the hosted callback URL.
+3. Run Gmail reconciliation on a schedule so replies appear without pressing **Check Gmail**.
+4. Add text-only PDF extraction and structured quote fields such as price, capacity, inclusions, and availability.
+5. Add ranking and visit scheduling after quote data is reliable.

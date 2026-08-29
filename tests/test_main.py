@@ -18,7 +18,7 @@ def test_dashboard_is_served() -> None:
 
     assert response.status_code == 200
     assert "Wedding Venue Control Center" in response.text
-    assert "Google Sheet · source of truth" in response.text
+    assert "Private venue workspace" in response.text
 
 
 def test_old_analysis_dashboard_is_parked() -> None:

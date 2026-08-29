@@ -156,3 +156,31 @@ class VenueOutreachReceipt(BaseModel):
     venue: str
     gmail_id: str | None = None
     gmail_thread_id: str | None = None
+
+
+class VenueCreate(BaseModel):
+    """Venue details entered through the private control center."""
+
+    name: str = Field(min_length=1, max_length=250)
+    location: str = Field(default="", max_length=250)
+    email: str = Field(
+        min_length=3,
+        max_length=320,
+        pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$",
+    )
+    website: str = Field(default="", max_length=500)
+    phone: str = Field(default="", max_length=100)
+    send_now: bool = False
+
+
+class ResponseSynthesis(BaseModel):
+    """Small, validated Kimi result used by the outreach dashboard."""
+
+    summary: str = Field(min_length=1, max_length=800)
+    status: Literal[
+        "responded",
+        "quote_received",
+        "viewing_offered",
+        "unavailable",
+        "needs_reply",
+    ] = "responded"

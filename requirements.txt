@@ -5,5 +5,7 @@ google-auth-oauthlib
 httpx
 pydantic-settings
 pypdf
+psycopg[binary]
 pytest
+sqlalchemy
 uvicorn[standard]

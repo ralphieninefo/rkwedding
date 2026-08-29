@@ -2,6 +2,7 @@
 
 import base64
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from typing import Any
 
@@ -32,8 +33,11 @@ class GmailMessage:
     message_id: str
     thread_id: str
     sender: str
+    recipients: str
     subject: str
     body: str
+    received_at: str
+    label_ids: tuple[str, ...] = ()
     history_id: str | None = None
     rfc_message_id: str | None = None
     references: str | None = None
@@ -93,8 +97,13 @@ def normalize_message(raw: dict[str, Any]) -> GmailMessage:
         message_id=message_id,
         thread_id=raw["threadId"],
         sender=headers.get("from", ""),
+        recipients=headers.get("to", ""),
         subject=headers.get("subject", ""),
         body=body,
+        received_at=datetime.fromtimestamp(
+            int(raw.get("internalDate", "0")) / 1000, tz=UTC
+        ).isoformat(),
+        label_ids=tuple(raw.get("labelIds", [])),
         history_id=raw.get("historyId"),
         rfc_message_id=headers.get("message-id"),
         references=headers.get("references"),
