@@ -17,12 +17,6 @@ const responseTableWrap = document.querySelector("#responseTableWrap");
 const responseRows = document.querySelector("#responseRows");
 const priceEstimate = document.querySelector("#priceEstimate");
 const priceEstimateDetail = document.querySelector("#priceEstimateDetail");
-const replyDialog = document.querySelector("#replyDialog");
-const replyForm = document.querySelector("#replyForm");
-const replyVenueName = document.querySelector("#replyVenueName");
-const replyMessage = document.querySelector("#replyMessage");
-const cancelReply = document.querySelector("#cancelReply");
-let replyVenueId = null;
 
 const formatDate = (value) => value
   ? new Date(value).toLocaleString([], {dateStyle: "medium", timeStyle: "short"})
@@ -60,13 +54,8 @@ const renderVenues = (venues) => {
     location.textContent = venue.location || "Location not added";
     identity.append(name, location);
 
-    const contact = document.createElement("td");
-    contact.className = "subject-cell";
-    const email = document.createElement("strong");
-    email.textContent = venue.email;
-    const details = document.createElement("small");
-    details.textContent = [venue.phone, venue.website].filter(Boolean).join(" · ") || "—";
-    contact.append(email, details);
+    const region = document.createElement("td");
+    region.textContent = venue.region || venue.location || "—";
 
     const sent = document.createElement("td");
     sent.textContent = formatDate(venue.sent_at);
@@ -87,39 +76,18 @@ const renderVenues = (venues) => {
     pill.textContent = venue.status;
     status.append(pill);
 
-    const price = document.createElement("td");
-    price.className = "subject-cell";
-    if (venue.price_minimum_eur || venue.price_maximum_eur) {
-      const range = document.createElement("strong");
-      const minimum = venue.price_minimum_eur || venue.price_maximum_eur;
-      const maximum = venue.price_maximum_eur || venue.price_minimum_eur;
-      range.textContent = minimum === maximum
-        ? formatEuro(minimum)
-        : `${formatEuro(minimum)}–${formatEuro(maximum)}`;
-      const note = document.createElement("small");
-      note.textContent = venue.price_note || "Estimated for 90 guests";
-      price.append(range, note);
-    } else {
-      price.textContent = "—";
-    }
-
     const actions = document.createElement("td");
-    if (venue.responded_at) {
-      const reply = document.createElement("button");
+    if (venue.gmail_url) {
+      const reply = document.createElement("a");
       reply.className = "button button-secondary reply-button";
-      reply.type = "button";
-      reply.textContent = "Reply";
-      reply.addEventListener("click", () => {
-        replyVenueId = venue.id;
-        replyVenueName.textContent = `Reply to ${venue.name}`;
-        replyMessage.textContent = "";
-        replyForm.reset();
-        replyDialog.showModal();
-      });
+      reply.href = venue.gmail_url;
+      reply.target = "_blank";
+      reply.rel = "noopener";
+      reply.textContent = venue.responded_at ? "Reply in Gmail" : "Open Gmail";
       actions.append(reply);
     }
 
-    row.append(identity, contact, sent, response, price, status, actions);
+    row.append(identity, region, sent, response, status, actions);
     responseRows.append(row);
   });
   trackedCount.textContent = venues.length.toLocaleString();
@@ -151,6 +119,7 @@ discoverForm.addEventListener("submit", async (event) => {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "Could not inspect that website.");
+    venueForm.reset();
     ["name", "location", "email", "website", "phone"].forEach((field) => {
       venueForm.elements[field].value = result[field] || "";
     });
@@ -208,30 +177,6 @@ syncButton.addEventListener("click", async () => {
   } finally {
     syncButton.disabled = false;
     syncButton.firstChild.textContent = "Check Gmail ";
-  }
-});
-
-cancelReply.addEventListener("click", () => replyDialog.close());
-
-replyForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = event.submitter;
-  button.disabled = true;
-  replyMessage.textContent = "Sending reply…";
-  try {
-    const response = await fetch(`/api/venues/${replyVenueId}/reply`, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({body: new FormData(replyForm).get("body")}),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || "Could not send reply.");
-    replyDialog.close();
-    await loadVenues();
-  } catch (error) {
-    replyMessage.textContent = error instanceof Error ? error.message : "Could not send reply.";
-  } finally {
-    button.disabled = false;
   }
 });
 

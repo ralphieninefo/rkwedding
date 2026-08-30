@@ -92,6 +92,12 @@ async def analysis_dashboard() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/venues", include_in_schema=False)
+async def venue_directory() -> FileResponse:
+    """Serve the complete venue reference directory."""
+    return FileResponse(STATIC_DIR / "venues.html")
+
+
 @app.get("/api/gmail/status")
 async def gmail_status() -> dict[str, bool]:
     from app.gmail_oauth import gmail_connected, oauth_setup_ready

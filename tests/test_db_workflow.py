@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from app.database import iso_utc, sort_venue_payloads
+from app.database import Message, Outreach, Venue, iso_utc, sort_venue_payloads, venue_payload
 from app.db_workflow import _fallback_summary, _is_incoming
 from app.gmail import GmailMessage
 
@@ -80,3 +80,32 @@ def test_venues_are_ordered_by_latest_response() -> None:
         "Older reply",
         "No reply",
     ]
+
+
+def test_venue_payload_uses_first_outreach_and_links_latest_thread() -> None:
+    venue = Venue(name="Villa Test", email="info@example.com")
+    venue.outreach = [
+        Outreach(
+            gmail_message_id="sent-2",
+            gmail_thread_id="thread-2",
+            sent_at=datetime(2026, 8, 29, 12),
+        ),
+        Outreach(
+            gmail_message_id="sent-1",
+            gmail_thread_id="thread-1",
+            sent_at=datetime(2026, 8, 28, 12),
+        ),
+    ]
+    venue.messages = [
+        Message(
+            gmail_message_id="reply-1",
+            gmail_thread_id="thread-1",
+            direction="inbound",
+            occurred_at=datetime(2026, 8, 29, 13),
+        )
+    ]
+
+    payload = venue_payload(venue)
+
+    assert payload["sent_at"].startswith("2026-08-28")
+    assert payload["gmail_url"].endswith("/thread-1")

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterator
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, create_engine, select
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 from app.config import get_settings
@@ -30,10 +30,14 @@ class Venue(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(250))
+    region: Mapped[str] = mapped_column(String(250), default="")
     location: Mapped[str] = mapped_column(String(250), default="")
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     website: Mapped[str] = mapped_column(String(500), default="")
     phone: Mapped[str] = mapped_column(String(100), default="")
+    vibe: Mapped[str] = mapped_column(String(250), default="")
+    guest_capacity: Mapped[str] = mapped_column(String(100), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(50), default="Draft")
     response_summary: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -124,6 +128,20 @@ SessionLocal = sessionmaker(bind=ENGINE, expire_on_commit=False)
 
 def init_database() -> None:
     Base.metadata.create_all(ENGINE)
+    columns = {column["name"] for column in inspect(ENGINE).get_columns("venues")}
+    additions = {
+        "region": "VARCHAR(250) DEFAULT ''",
+        "vibe": "VARCHAR(250) DEFAULT ''",
+        "guest_capacity": "VARCHAR(100) DEFAULT ''",
+        "notes": "TEXT DEFAULT ''",
+    }
+    with ENGINE.begin() as connection:
+        for name, definition in additions.items():
+            if name in columns:
+                continue
+            connection.execute(
+                text(f"ALTER TABLE venues ADD COLUMN {name} {definition}")
+            )
 
 
 def session_scope() -> Iterator[Session]:
@@ -136,9 +154,13 @@ def upsert_venue(
     *,
     name: str,
     email: str,
+    region: str = "",
     location: str = "",
     website: str = "",
     phone: str = "",
+    vibe: str = "",
+    guest_capacity: str = "",
+    notes: str = "",
 ) -> Venue:
     normalized = email.strip().casefold()
     venue = session.scalar(select(Venue).where(Venue.email == normalized))
@@ -146,33 +168,50 @@ def upsert_venue(
         venue = Venue(name=name.strip(), email=normalized)
         session.add(venue)
     venue.name = name.strip()
+    venue.region = region.strip()
     venue.location = location.strip()
     venue.website = website.strip()
     venue.phone = phone.strip()
+    venue.vibe = vibe.strip()
+    venue.guest_capacity = guest_capacity.strip()
+    venue.notes = notes.strip()
     session.commit()
     return venue
 
 
 def venue_payload(venue: Venue) -> dict[str, object]:
-    latest_outreach = max(
+    first_outreach = min(
         venue.outreach, key=lambda item: item.sent_at, default=None
     )
     inbound = [item for item in venue.messages if item.direction == "inbound"]
     latest_reply = max(inbound, key=lambda item: item.occurred_at, default=None)
+    gmail_thread_id = (
+        latest_reply.gmail_thread_id
+        if latest_reply
+        else first_outreach.gmail_thread_id if first_outreach else None
+    )
     return {
         "id": venue.id,
         "name": venue.name,
+        "region": venue.region,
         "location": venue.location,
         "email": venue.email,
         "website": venue.website,
         "phone": venue.phone,
+        "vibe": venue.vibe,
+        "guest_capacity": venue.guest_capacity,
+        "notes": venue.notes,
         "status": venue.status,
-        "sent_at": iso_utc(latest_outreach.sent_at) if latest_outreach else None,
+        "sent_at": iso_utc(first_outreach.sent_at) if first_outreach else None,
         "responded_at": iso_utc(latest_reply.occurred_at) if latest_reply else None,
         "response_summary": venue.response_summary,
         "price_minimum_eur": venue.estimate.minimum_eur if venue.estimate else None,
         "price_maximum_eur": venue.estimate.maximum_eur if venue.estimate else None,
         "price_note": venue.estimate.note if venue.estimate else "",
+        "gmail_url": (
+            f"https://mail.google.com/mail/u/0/#all/{gmail_thread_id}"
+            if gmail_thread_id else None
+        ),
     }
 
 

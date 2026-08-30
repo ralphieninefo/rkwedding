@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Complete wedding venue reference directory.">
+    <title>All Venues · Wedding Venue Control Center</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/inbox.css">
+    <link rel="stylesheet" href="/static/venues.css">
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Wedding Venue Control Center home">
+        <span class="brand-mark" aria-hidden="true">KR</span>
+        <span><strong>Venue Control Center</strong><small>Kassia &amp; Raphaël</small></span>
+      </a>
+      <nav class="site-nav" aria-label="Control center pages">
+        <a href="/">Tracking</a>
+        <a class="active" href="/venues">All venues</a>
+      </nav>
+      <span class="badge"><span class="status-dot" aria-hidden="true"></span><span id="directoryCount">Loading</span></span>
+    </header>
+
+    <main class="page-shell directory-shell">
+      <section class="directory-hero">
+        <div><p class="eyebrow">Complete reference</p><h1>All venue information.</h1><p class="hero-description">Contacts, locations, pricing, outreach history, and response details in one place.</p></div>
+        <label class="directory-search"><span>Search venues</span><input id="venueSearch" type="search" placeholder="Name, region, email…"></label>
+      </section>
+      <p class="tracker-message" id="directoryMessage">Loading venue directory…</p>
+      <section class="venue-directory" id="venueDirectory" hidden></section>
+    </main>
+
+    <footer class="site-footer"><span>Control center · Full venue metadata</span><a href="/">Back to tracking ↗</a></footer>
+    <script src="/static/venues.js" defer></script>
+  </body>
+</html>

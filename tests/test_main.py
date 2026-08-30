@@ -28,6 +28,14 @@ def test_old_analysis_dashboard_is_parked() -> None:
     assert "Wedding Venue Desk" in response.text
 
 
+def test_venue_directory_is_served() -> None:
+    response = client.get("/venues")
+
+    assert response.status_code == 200
+    assert "All venue information" in response.text
+    assert "Search venues" in response.text
+
+
 def test_hosted_dashboard_requires_password(monkeypatch) -> None:
     settings = Settings(
         control_center_username="raph",

@@ -9,23 +9,25 @@ A private FastAPI dashboard for managing wedding-venue outreach without manually
 2. Choose **Save venue** or **Save & send inquiry**. Sending only happens after the explicit send action.
 3. Use **Check Gmail** to reconcile sent messages and replies.
 4. The application stores the complete message privately, asks DigitalOcean Serverless Inference for a short English synthesis and 90-guest price estimate, and displays only that synthesis in the dashboard.
-5. Use **Reply** to send a human-written message inside the tracked Gmail thread.
+5. Use **Reply in Gmail** to open the correct tracked thread and answer there.
 
-The application database is the source of truth. The existing Google Sheet can be imported once to seed venues, but it no longer controls the workflow.
+The application database stores workflow state and message history. The existing Google Sheet remains the reference source for venue metadata such as region, capacity, vibe, and notes; that metadata is refreshed during Gmail reconciliation.
 
 ## What is implemented
 
-- Venue form with name, location, email, website, and phone
+- Venue form with name, region, location, email, website, and phone
+- Compact tracking dashboard with first outreach, latest English synthesis, workflow step, and direct Gmail link
+- Separate searchable venue directory with contact details, metadata, pricing, and conversation history
 - Explicit draft/save-and-send actions
 - Exact-email Gmail matching and idempotent message ingestion
 - Sent and responded status tracking
 - Focused English Kimi response synthesis and price estimation through DigitalOcean Serverless Inference
 - Persistent last-successful Gmail refresh time
-- Human-written replies sent inside the correct Gmail thread
+- Human-written replies opened directly in the correct Gmail thread
 - Safe public website contact discovery with an explicit send confirmation
 - Full email bodies stored in the database but excluded from dashboard/API venue responses
 - SQLite for local development and PostgreSQL-compatible production storage
-- Optional one-time import from the existing `Venues` Sheet
+- Initial Sheet import plus ongoing metadata refresh for tracked venues
 
 PDF quote extraction is the next layer. The current milestone tracks and summarizes email replies; it does not yet write structured PDF pricing into the database.
 
@@ -86,7 +88,7 @@ Dashboard ──> FastAPI ──> SQLite locally / PostgreSQL in production
                     │
                     ├──> Serverless Inference: concise reply synthesis
                     │
-                    └──> Google Sheets: optional one-time venue import
+                    └──> Google Sheets: initial import + reference metadata refresh
 ```
 
 Application code owns sending rules, state, matching, and deduplication. Kimi has one bounded job: convert a reply into a concise summary and status. This does not require a general-purpose autonomous agent.

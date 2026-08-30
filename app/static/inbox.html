@@ -17,6 +17,10 @@
         <span class="brand-mark" aria-hidden="true">KR</span>
         <span><strong>Venue Control Center</strong><small>Kassia &amp; Raphaël</small></span>
       </a>
+      <nav class="site-nav" aria-label="Control center pages">
+        <a class="active" href="/">Tracking</a>
+        <a href="/venues">All venues</a>
+      </nav>
       <span class="badge badge-muted" id="gmailBadge">
         <span class="status-dot" aria-hidden="true"></span>
         <span id="gmailStatus">Checking Gmail</span>
@@ -49,6 +53,7 @@
         <div class="form-divider"><span>or enter details manually</span></div>
         <form id="venueForm" class="venue-form">
           <label><span>Venue name</span><input name="name" required autocomplete="organization"></label>
+          <label><span>Region</span><input name="region" placeholder="Lago Albano, Gaeta, Rome…"></label>
           <label><span>Location</span><input name="location" autocomplete="address-level2"></label>
           <label><span>Email</span><input name="email" type="email" required autocomplete="email"></label>
           <label><span>Website</span><input name="website" type="url" placeholder="https://"></label>
@@ -80,29 +85,16 @@
         <div class="tracker-message" id="trackerMessage">No venues yet. Add one above.</div>
         <div class="response-table-wrap" id="responseTableWrap" hidden>
           <table class="response-table">
-            <thead><tr><th>Venue</th><th>Contact</th><th>Sent</th><th>English response synthesis</th><th>Price estimate</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Venue</th><th>Region</th><th>First email sent</th><th>English response synthesis</th><th>Step</th><th></th></tr></thead>
             <tbody id="responseRows"></tbody>
           </table>
         </div>
       </section>
     </main>
 
-    <dialog class="reply-dialog" id="replyDialog">
-      <form id="replyForm" method="dialog">
-        <p class="eyebrow">Reply in Gmail thread</p>
-        <h2 id="replyVenueName">Reply to venue</h2>
-        <label><span>Your message</span><textarea name="body" rows="8" required></textarea></label>
-        <p class="form-message" id="replyMessage" role="status"></p>
-        <div class="venue-form-actions">
-          <button class="button button-secondary" id="cancelReply" type="button">Cancel</button>
-          <button class="button button-primary" type="submit">Send reply</button>
-        </div>
-      </form>
-    </dialog>
-
     <footer class="site-footer">
       <span>Control center · Private app database</span>
-      <a href="/analysis">Earlier analysis prototype ↗</a>
+      <a href="/venues">Full venue directory ↗</a>
     </footer>
     <script src="/static/inbox.js" defer></script>
   </body>

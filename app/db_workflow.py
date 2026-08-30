@@ -73,12 +73,50 @@ async def import_sheet_venues(settings: Settings) -> dict[str, int]:
                 session,
                 name=row.get("Venue", email),
                 email=email,
+                region=row.get("Region", ""),
                 location=row.get("Location", ""),
                 website=row.get("Website", ""),
                 phone=row.get("Phone", ""),
+                vibe=row.get("Vibe", ""),
+                guest_capacity=row.get("Guest Capacity", ""),
+                notes=row.get("Notes", ""),
             )
             imported += 1
     return {"imported": imported, "skipped": skipped}
+
+
+async def refresh_existing_venue_metadata(settings: Settings) -> int:
+    """Refresh reference fields for tracked venues without importing new rows."""
+    if not settings.google_spreadsheet_id:
+        return 0
+    token = await get_google_access_token(settings)
+    rows = await GoogleSheetsClient(
+        token, settings.google_spreadsheet_id
+    ).get_rows(settings.google_venues_sheet)
+    refreshed = 0
+    with SessionLocal() as session:
+        for row in rows:
+            email = row.get("Email", "").strip().casefold()
+            if not email:
+                continue
+            venue = session.scalar(select(Venue).where(Venue.email == email))
+            if venue is None:
+                continue
+            fields = {
+                "region": row.get("Region", ""),
+                "location": row.get("Location", ""),
+                "website": row.get("Website", ""),
+                "phone": row.get("Phone", ""),
+                "vibe": row.get("Vibe", ""),
+                "guest_capacity": row.get("Guest Capacity", ""),
+                "notes": row.get("Notes", ""),
+            }
+            for field, value in fields.items():
+                if value.strip():
+                    setattr(venue, field, value.strip())
+            refreshed += 1
+        session.commit()
+    return refreshed
 
 
 async def create_venue_and_optionally_send(
@@ -86,6 +124,7 @@ async def create_venue_and_optionally_send(
     *,
     name: str,
     email: str,
+    region: str,
     location: str,
     website: str,
     phone: str,
@@ -96,6 +135,7 @@ async def create_venue_and_optionally_send(
             session,
             name=name,
             email=email,
+            region=region,
             location=location,
             website=website,
             phone=phone,
@@ -154,7 +194,7 @@ async def _synthesize(
             "quote_received": "Quote received",
             "viewing_offered": "Viewing offered",
             "unavailable": "Unavailable",
-            "needs_reply": "Needs reply",
+            "needs_reply": "More info needed",
         }.get(synthesis.status, "Responded")
         return synthesis, status
     except (
@@ -206,6 +246,7 @@ async def reconcile_gmail_database(
     settings: Settings, *, days: int = 365
 ) -> dict[str, object]:
     """Persist new sent/reply messages once and synthesize replies for the UI."""
+    metadata_refreshed = await refresh_existing_venue_metadata(settings)
     token = await get_google_access_token(settings)
     gmail = GmailClient(token, settings.google_gmail_user_id)
     with SessionLocal() as session:
@@ -295,8 +336,14 @@ async def reconcile_gmail_database(
                                 sent_at=_when(message.received_at),
                             )
                         )
-                    if venue.status in {"Draft", "Sent", "Existing conversation"}:
-                        venue.status = "Sent"
+                    prior_inbound = session.scalar(
+                        select(Message.id).where(
+                            Message.venue_id == venue_id,
+                            Message.direction == "inbound",
+                            Message.occurred_at < _when(message.received_at),
+                        )
+                    )
+                    venue.status = "Responded to venue" if prior_inbound else "Sent"
                     sent += 1
                 else:
                     venue.status = status
@@ -308,6 +355,11 @@ async def reconcile_gmail_database(
         with SessionLocal() as session:
             venue = session.get(Venue, venue_id)
             assert venue is not None
+            latest_outbound = session.scalar(
+                select(Message)
+                .where(Message.venue_id == venue_id, Message.direction == "outbound")
+                .order_by(Message.occurred_at.desc())
+            )
             latest_reply = session.scalar(
                 select(Message)
                 .where(Message.venue_id == venue_id, Message.direction == "inbound")
@@ -315,7 +367,11 @@ async def reconcile_gmail_database(
             )
             if latest_reply:
                 venue.response_summary = latest_reply.synthesized_summary
-                if venue.status == "Sent":
+                if latest_outbound and latest_outbound.occurred_at > latest_reply.occurred_at:
+                    venue.status = "Responded to venue"
+                elif venue.status == "Needs reply":
+                    venue.status = "More info needed"
+                elif venue.status in {"Sent", "Existing conversation"}:
                     venue.status = "Responded"
                 session.commit()
     refreshed_at = datetime.now(UTC)
@@ -325,6 +381,7 @@ async def reconcile_gmail_database(
         "new_messages": new_messages,
         "sent_confirmed": sent,
         "replies_synthesized": replies,
+        "metadata_refreshed": metadata_refreshed,
         "last_refreshed_at": iso_utc(refreshed_at),
     }
 
