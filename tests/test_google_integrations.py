@@ -1,13 +1,16 @@
 """Tests for Google API normalization and safe outreach behavior."""
 
 import base64
+import json
+
+import httpx
 
 import pytest
 from pydantic import SecretStr
 
 from app.config import Settings
 from app.documents import extract_pdf_text
-from app.gmail import GmailSendResult, normalize_message
+from app.gmail import GmailClient, GmailSendResult, normalize_message
 from app.models import VenueOutreachEvent
 from app.workflow import WeddingWorkflow
 
@@ -50,8 +53,42 @@ def test_normalize_message_extracts_text_headers_and_pdf() -> None:
     assert message.attachments[0].filename == "quote.pdf"
 
 
+def test_normalize_message_converts_html_to_readable_text() -> None:
+    message = normalize_message({
+        "id": "message-html",
+        "threadId": "thread-html",
+        "payload": {
+            "mimeType": "text/html",
+            "body": {"data": websafe("<html><style>.x{color:red}</style><body><p>Menu €120 per person</p></body></html>")},
+        },
+    })
+
+    assert message.body == "Menu €120 per person"
+    assert "style" not in message.body
+
+
 def test_invalid_pdf_is_left_for_manual_review() -> None:
     assert extract_pdf_text(b"not a pdf") == ""
+
+
+@pytest.mark.anyio
+async def test_dashboard_reply_stays_in_existing_gmail_thread() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["threadId"] == "thread-1"
+        return httpx.Response(200, json={"id": "reply-2", "threadId": "thread-1"})
+
+    gmail = GmailClient("token", transport=httpx.MockTransport(handler))
+    result = await gmail.send_reply(
+        recipient="staff@venue.example",
+        subject="Re: Wedding inquiry",
+        body="Thank you.",
+        thread_id="thread-1",
+        in_reply_to="<reply@venue.example>",
+    )
+
+    assert result.message_id == "reply-2"
+    assert result.thread_id == "thread-1"
 
 
 class FakeGmail:

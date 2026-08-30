@@ -9,10 +9,20 @@ import httpx
 from sqlalchemy import select
 
 from app.config import Settings
-from app.database import Message, Outreach, SessionLocal, Venue, upsert_venue
+from app.database import (
+    Message,
+    Outreach,
+    PriceEstimate,
+    SessionLocal,
+    Venue,
+    iso_utc,
+    set_system_state,
+    upsert_venue,
+)
 from app.gmail import GmailClient, GmailMessage
 from app.google_auth import get_google_access_token
 from app.inference import DigitalOceanInferenceClient, InvalidInferenceResponseError
+from app.models import ResponseSynthesis
 from app.sheets import GoogleSheetsClient
 from app.workflow import OUTREACH_BODY, OUTREACH_SUBJECT
 
@@ -127,10 +137,10 @@ async def create_venue_and_optionally_send(
 
 async def _synthesize(
     settings: Settings, message: GmailMessage, venue: Venue
-) -> tuple[str, str]:
-    fallback = _fallback_summary(message.body or message.subject)
+) -> tuple[ResponseSynthesis, str]:
+    fallback = "Response received; English synthesis is temporarily unavailable."
     if not settings.inference_configured or not (message.body or message.subject):
-        return fallback, "Responded"
+        return ResponseSynthesis(summary=fallback), "Responded"
     try:
         synthesis = await asyncio.wait_for(
             DigitalOceanInferenceClient(settings).synthesize_response(
@@ -146,14 +156,33 @@ async def _synthesize(
             "unavailable": "Unavailable",
             "needs_reply": "Needs reply",
         }.get(synthesis.status, "Responded")
-        return synthesis.summary, status
+        return synthesis, status
     except (
         TimeoutError,
         httpx.HTTPError,
         InvalidInferenceResponseError,
         ValueError,
     ):
-        return fallback, "Responded"
+        return ResponseSynthesis(summary=fallback), "Responded"
+
+
+def _save_estimate(
+    session, venue_id: int, message_id: str, synthesis: ResponseSynthesis
+) -> None:
+    if (
+        synthesis.estimated_total_min_eur is None
+        and synthesis.estimated_total_max_eur is None
+    ):
+        return
+    estimate = session.scalar(
+        select(PriceEstimate).where(PriceEstimate.venue_id == venue_id)
+    ) or PriceEstimate(venue_id=venue_id)
+    estimate.source_message_id = message_id
+    estimate.minimum_eur = synthesis.estimated_total_min_eur
+    estimate.maximum_eur = synthesis.estimated_total_max_eur
+    estimate.note = synthesis.price_note
+    estimate.updated_at = datetime.now(UTC)
+    session.add(estimate)
 
 
 def _fallback_summary(value: str) -> str:
@@ -175,7 +204,7 @@ def _fallback_summary(value: str) -> str:
 
 async def reconcile_gmail_database(
     settings: Settings, *, days: int = 365
-) -> dict[str, int]:
+) -> dict[str, object]:
     """Persist new sent/reply messages once and synthesize replies for the UI."""
     token = await get_google_access_token(settings)
     gmail = GmailClient(token, settings.google_gmail_user_id)
@@ -230,12 +259,13 @@ async def reconcile_gmail_database(
                     select(Message).where(Message.gmail_message_id == message.message_id)
                 ):
                     continue
-            summary = status = ""
+            synthesis = ResponseSynthesis(summary="Message sent.")
+            status = ""
             if incoming:
                 with SessionLocal() as session:
                     venue = session.get(Venue, venue_id)
                     assert venue is not None
-                    summary, status = await _synthesize(settings, message, venue)
+                    synthesis, status = await _synthesize(settings, message, venue)
             with SessionLocal() as session:
                 venue = session.get(Venue, venue_id)
                 assert venue is not None
@@ -247,7 +277,7 @@ async def reconcile_gmail_database(
                         direction="outbound" if outgoing else "inbound",
                         subject=message.subject,
                         body=message.body,
-                        synthesized_summary=summary,
+                        synthesized_summary=synthesis.summary if incoming else "",
                         occurred_at=_when(message.received_at),
                     )
                 )
@@ -270,7 +300,8 @@ async def reconcile_gmail_database(
                     sent += 1
                 else:
                     venue.status = status
-                    venue.response_summary = summary
+                    venue.response_summary = synthesis.summary
+                    _save_estimate(session, venue_id, message.message_id, synthesis)
                     replies += 1
                 session.commit()
                 new_messages += 1
@@ -287,4 +318,101 @@ async def reconcile_gmail_database(
                 if venue.status == "Sent":
                     venue.status = "Responded"
                 session.commit()
-    return {"new_messages": new_messages, "sent_confirmed": sent, "replies_synthesized": replies}
+    refreshed_at = datetime.now(UTC)
+    with SessionLocal() as session:
+        set_system_state(session, "gmail_last_refresh", iso_utc(refreshed_at))
+    return {
+        "new_messages": new_messages,
+        "sent_confirmed": sent,
+        "replies_synthesized": replies,
+        "last_refreshed_at": iso_utc(refreshed_at),
+    }
+
+
+async def reply_to_venue(settings: Settings, venue_id: int, body: str) -> dict[str, object]:
+    """Send an explicit human-written reply to the venue's latest message."""
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        latest = session.scalar(
+            select(Message)
+            .where(Message.venue_id == venue_id, Message.direction == "inbound")
+            .order_by(Message.occurred_at.desc())
+        )
+        if latest is None:
+            raise ValueError("This venue has not replied yet.")
+        latest_id = latest.gmail_message_id
+        thread_id = latest.gmail_thread_id
+    token = await get_google_access_token(settings)
+    gmail = GmailClient(token, settings.google_gmail_user_id)
+    source = await gmail.get_message(latest_id)
+    recipient = parseaddr(source.sender)[1] or venue.email
+    subject = (
+        source.subject
+        if source.subject.casefold().startswith(("re:", "r:"))
+        else f"Re: {source.subject}"
+    )
+    result = await gmail.send_reply(
+        recipient=recipient,
+        subject=subject,
+        body=body.strip(),
+        thread_id=thread_id,
+        in_reply_to=source.rfc_message_id,
+        references=source.references,
+    )
+    now = datetime.now(UTC)
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        assert venue is not None
+        venue.status = "Replied"
+        session.add(Message(
+            venue_id=venue_id,
+            gmail_message_id=result.message_id,
+            gmail_thread_id=result.thread_id,
+            direction="outbound",
+            subject=subject,
+            body=body.strip(),
+            synthesized_summary="",
+            occurred_at=now,
+        ))
+        session.commit()
+    return {"sent": True, "status": "Replied"}
+
+
+async def backfill_response_insights(settings: Settings) -> dict[str, int]:
+    """Re-run bounded English synthesis for existing latest replies."""
+    token = await get_google_access_token(settings)
+    gmail = GmailClient(token, settings.google_gmail_user_id)
+    updated = 0
+    with SessionLocal() as session:
+        venue_ids = session.scalars(select(Venue.id)).all()
+    for venue_id in venue_ids:
+        with SessionLocal() as session:
+            venue = session.get(Venue, venue_id)
+            latest = session.scalar(
+                select(Message)
+                .where(Message.venue_id == venue_id, Message.direction == "inbound")
+                .order_by(Message.occurred_at.desc())
+            )
+            if venue is None or latest is None:
+                continue
+            message_id = latest.gmail_message_id
+        message = await gmail.get_message(message_id)
+        synthesis, status = await _synthesize(settings, message, venue)
+        with SessionLocal() as session:
+            venue = session.get(Venue, venue_id)
+            latest = session.scalar(select(Message).where(Message.gmail_message_id == message_id))
+            assert venue is not None and latest is not None
+            fallback_used = synthesis.summary.startswith(
+                "Response received; English synthesis is temporarily unavailable."
+            )
+            if not fallback_used or not venue.response_summary:
+                venue.response_summary = synthesis.summary
+                latest.synthesized_summary = synthesis.summary
+            if not fallback_used:
+                venue.status = status
+            _save_estimate(session, venue_id, message_id, synthesis)
+            session.commit()
+            updated += 1
+    return {"updated": updated}

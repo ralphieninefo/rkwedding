@@ -23,8 +23,11 @@ from app.models import (
     VenueComparisonRequest,
     VenueComparisonResponse,
     VenueCreate,
+    VenueDiscovery,
+    VenueDiscoveryRequest,
     VenueOutreachEvent,
     VenueOutreachReceipt,
+    VenueReply,
 )
 from app.scoring import rank_venues
 
@@ -169,10 +172,10 @@ async def tracked_responses() -> dict[str, object]:
 @app.get("/api/venues")
 async def sheet_venues() -> dict[str, object]:
     """Return database-backed venue status without exposing full email bodies."""
-    from app.database import SessionLocal, list_venues
+    from app.database import SessionLocal, dashboard_payload
 
     with SessionLocal() as session:
-        return {"venues": list_venues(session)}
+        return dashboard_payload(session)
 
 
 @app.post("/api/venues")
@@ -201,6 +204,37 @@ async def import_existing_sheet() -> dict[str, int]:
         raise HTTPException(status_code=401, detail="Connect Google first.") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Could not read the venue Sheet.") from exc
+
+
+@app.post("/api/venues/discover", response_model=VenueDiscovery)
+async def discover_venue_contact(request: VenueDiscoveryRequest) -> VenueDiscovery:
+    """Find public contact details without sending an email."""
+    from app.discovery import discover_venue
+
+    try:
+        result = await discover_venue(request.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Could not read that venue website.") from exc
+    if not result.email:
+        raise HTTPException(status_code=404, detail="No public email address was found.")
+    return result
+
+
+@app.post("/api/venues/{venue_id}/reply")
+async def reply_to_venue(venue_id: int, reply: VenueReply) -> dict[str, object]:
+    """Send one explicit dashboard reply inside the tracked Gmail thread."""
+    from app.db_workflow import reply_to_venue as send_reply
+
+    try:
+        return await send_reply(get_settings(), venue_id, reply.body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=401, detail="Connect Google first.") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Gmail could not send the reply.") from exc
 
 
 @app.post("/api/gmail/sync")

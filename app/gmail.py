@@ -7,6 +7,7 @@ from email.message import EmailMessage
 from typing import Any
 
 import httpx
+from bs4 import BeautifulSoup
 
 
 def _decode_websafe(value: str) -> bytes:
@@ -92,7 +93,12 @@ def normalize_message(raw: dict[str, Any]) -> GmailMessage:
             visit(child)
 
     visit(payload)
-    body = "\n\n".join(plain_parts or html_parts).strip()
+    body = "\n\n".join(plain_parts).strip()
+    if not body and html_parts:
+        soup = BeautifulSoup("\n\n".join(html_parts), "html.parser")
+        for hidden in soup(["script", "style", "head"]):
+            hidden.decompose()
+        body = soup.get_text("\n", strip=True)
     return GmailMessage(
         message_id=message_id,
         thread_id=raw["threadId"],
@@ -253,5 +259,33 @@ class GmailClient:
             "POST",
             f"/users/{self.user_id}/messages/send",
             json={"raw": raw},
+        )
+        return GmailSendResult(message_id=data["id"], thread_id=data["threadId"])
+
+    async def send_reply(
+        self,
+        *,
+        recipient: str,
+        subject: str,
+        body: str,
+        thread_id: str,
+        in_reply_to: str | None = None,
+        references: str | None = None,
+    ) -> GmailSendResult:
+        """Send a human-approved reply inside an existing Gmail thread."""
+        message = EmailMessage()
+        message["To"] = recipient
+        message["Subject"] = subject
+        if in_reply_to:
+            message["In-Reply-To"] = in_reply_to
+            message["References"] = " ".join(
+                part for part in [references, in_reply_to] if part
+            )
+        message.set_content(body)
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode().rstrip("=")
+        data = await self._request(
+            "POST",
+            f"/users/{self.user_id}/messages/send",
+            json={"raw": raw, "threadId": thread_id},
         )
         return GmailSendResult(message_id=data["id"], thread_id=data["threadId"])

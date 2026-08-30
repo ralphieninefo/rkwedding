@@ -64,8 +64,11 @@ async def test_inference_returns_small_response_synthesis() -> None:
         payload = json.loads(request.content)
         assert payload["max_tokens"] == 400
         content = {
-            "summary": "Menu da EUR 120–150 a persona; capienza massima 90 ospiti.",
+            "summary": "Menus cost EUR 120–150 per person for up to 90 guests.",
             "status": "quote_received",
+            "estimated_total_min_eur": 10800,
+            "estimated_total_max_eur": 13500,
+            "price_note": "90 guests at EUR 120–150 per person.",
         }
         return httpx.Response(
             200,
@@ -88,3 +91,4 @@ async def test_inference_returns_small_response_synthesis() -> None:
 
     assert result.status == "quote_received"
     assert "120" in result.summary
+    assert result.estimated_total_min_eur == 10800

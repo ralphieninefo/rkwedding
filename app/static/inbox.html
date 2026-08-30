@@ -41,6 +41,12 @@
         <div class="panel-heading compact">
           <div><p class="eyebrow">New venue</p><h2>Add contact details</h2></div>
         </div>
+        <form id="discoverForm" class="discover-form">
+          <label><span>Venue website</span><input name="url" type="url" required placeholder="https://venue.example"></label>
+          <button class="button button-primary" type="submit">Find contact</button>
+          <p class="form-message" id="discoverMessage" role="status"></p>
+        </form>
+        <div class="form-divider"><span>or enter details manually</span></div>
         <form id="venueForm" class="venue-form">
           <label><span>Venue name</span><input name="name" required autocomplete="organization"></label>
           <label><span>Location</span><input name="location" autocomplete="address-level2"></label>
@@ -63,7 +69,8 @@
       <section class="summary-grid" aria-label="Response summary">
         <article class="brief-card"><span class="brief-label">Venues</span><strong id="trackedCount">0</strong><span>saved in the app</span></article>
         <article class="brief-card"><span class="brief-label">Last refresh</span><strong class="summary-text" id="lastCheck">Not yet</strong><span id="lastCheckDetail">Connect Google to begin</span></article>
-        <article class="brief-card brief-card-accent"><span class="brief-label">Workflow</span><strong class="summary-text">App → Gmail</strong><span>Replies synthesized by Kimi</span></article>
+        <article class="brief-card"><span class="brief-label">Estimated price</span><strong class="summary-text" id="priceEstimate">Not enough data</strong><span id="priceEstimateDetail">Based on 90 guests</span></article>
+        <article class="brief-card brief-card-accent"><span class="brief-label">Workflow</span><strong class="summary-text">App → Gmail</strong><span>English summaries by Kimi</span></article>
       </section>
 
       <section class="panel response-panel" aria-labelledby="responsesTitle">
@@ -73,12 +80,25 @@
         <div class="tracker-message" id="trackerMessage">No venues yet. Add one above.</div>
         <div class="response-table-wrap" id="responseTableWrap" hidden>
           <table class="response-table">
-            <thead><tr><th>Venue</th><th>Contact</th><th>Sent</th><th>Response synthesis</th><th>Status</th></tr></thead>
+            <thead><tr><th>Venue</th><th>Contact</th><th>Sent</th><th>English response synthesis</th><th>Price estimate</th><th>Status</th><th></th></tr></thead>
             <tbody id="responseRows"></tbody>
           </table>
         </div>
       </section>
     </main>
+
+    <dialog class="reply-dialog" id="replyDialog">
+      <form id="replyForm" method="dialog">
+        <p class="eyebrow">Reply in Gmail thread</p>
+        <h2 id="replyVenueName">Reply to venue</h2>
+        <label><span>Your message</span><textarea name="body" rows="8" required></textarea></label>
+        <p class="form-message" id="replyMessage" role="status"></p>
+        <div class="venue-form-actions">
+          <button class="button button-secondary" id="cancelReply" type="button">Cancel</button>
+          <button class="button button-primary" type="submit">Send reply</button>
+        </div>
+      </form>
+    </dialog>
 
     <footer class="site-footer">
       <span>Control center · Private app database</span>

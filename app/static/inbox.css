@@ -47,7 +47,7 @@
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 14px;
 }
@@ -70,6 +70,58 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.discover-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.discover-form label span,
+.reply-dialog label span {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.discover-form input,
+.reply-dialog textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  font: inherit;
+}
+
+.discover-form .form-message {
+  grid-column: 1 / -1;
+}
+
+.form-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.form-divider::before,
+.form-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+  content: "";
 }
 
 .venue-form label span {
@@ -171,6 +223,37 @@
   text-transform: capitalize;
 }
 
+.reply-button {
+  white-space: nowrap;
+}
+
+.reply-dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 24px 80px rgba(24, 34, 28, 0.25);
+}
+
+.reply-dialog::backdrop {
+  background: rgba(22, 31, 27, 0.5);
+  backdrop-filter: blur(3px);
+}
+
+.reply-dialog h2 {
+  margin: 6px 0 20px;
+}
+
+.reply-dialog textarea {
+  resize: vertical;
+}
+
+.reply-dialog .venue-form-actions {
+  margin-top: 16px;
+}
+
 @media (max-width: 800px) {
   .inbox-hero {
     align-items: flex-start;
@@ -184,6 +267,10 @@
   }
 
   .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .discover-form {
     grid-template-columns: 1fr;
   }
 

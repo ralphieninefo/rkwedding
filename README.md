@@ -5,9 +5,11 @@ A private FastAPI dashboard for managing wedding-venue outreach without manually
 ## Current workflow
 
 1. Add a venue in the dashboard.
-2. Choose **Save draft** or **Save & send inquiry**. Sending only happens after the explicit send action.
+   You can paste its public website to discover the name, email, and phone, then review the result.
+2. Choose **Save venue** or **Save & send inquiry**. Sending only happens after the explicit send action.
 3. Use **Check Gmail** to reconcile sent messages and replies.
-4. The application stores the complete message privately, asks DigitalOcean Serverless Inference for a short synthesis, and displays only that synthesis in the dashboard.
+4. The application stores the complete message privately, asks DigitalOcean Serverless Inference for a short English synthesis and 90-guest price estimate, and displays only that synthesis in the dashboard.
+5. Use **Reply** to send a human-written message inside the tracked Gmail thread.
 
 The application database is the source of truth. The existing Google Sheet can be imported once to seed venues, but it no longer controls the workflow.
 
@@ -17,7 +19,10 @@ The application database is the source of truth. The existing Google Sheet can b
 - Explicit draft/save-and-send actions
 - Exact-email Gmail matching and idempotent message ingestion
 - Sent and responded status tracking
-- Focused Kimi response synthesis through DigitalOcean Serverless Inference
+- Focused English Kimi response synthesis and price estimation through DigitalOcean Serverless Inference
+- Persistent last-successful Gmail refresh time
+- Human-written replies sent inside the correct Gmail thread
+- Safe public website contact discovery with an explicit send confirmation
 - Full email bodies stored in the database but excluded from dashboard/API venue responses
 - SQLite for local development and PostgreSQL-compatible production storage
 - Optional one-time import from the existing `Venues` Sheet

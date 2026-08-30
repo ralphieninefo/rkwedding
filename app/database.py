@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterator
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, create_engine, select
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 from app.config import get_settings
@@ -46,6 +46,9 @@ class Venue(Base):
     messages: Mapped[list["Message"]] = relationship(
         back_populates="venue", cascade="all, delete-orphan"
     )
+    estimate: Mapped["PriceEstimate | None"] = relationship(
+        back_populates="venue", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class Outreach(Base):
@@ -72,6 +75,26 @@ class Message(Base):
     synthesized_summary: Mapped[str] = mapped_column(Text, default="")
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     venue: Mapped[Venue] = relationship(back_populates="messages")
+
+
+class PriceEstimate(Base):
+    __tablename__ = "price_estimates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue_id: Mapped[int] = mapped_column(ForeignKey("venues.id"), unique=True)
+    source_message_id: Mapped[str] = mapped_column(String(100), default="")
+    minimum_eur: Mapped[float | None] = mapped_column(Float, nullable=True)
+    maximum_eur: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    venue: Mapped[Venue] = relationship(back_populates="estimate")
+
+
+class SystemState(Base):
+    __tablename__ = "system_state"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
 
 
 def _database_url() -> str:
@@ -147,12 +170,55 @@ def venue_payload(venue: Venue) -> dict[str, object]:
         "sent_at": iso_utc(latest_outreach.sent_at) if latest_outreach else None,
         "responded_at": iso_utc(latest_reply.occurred_at) if latest_reply else None,
         "response_summary": venue.response_summary,
+        "price_minimum_eur": venue.estimate.minimum_eur if venue.estimate else None,
+        "price_maximum_eur": venue.estimate.maximum_eur if venue.estimate else None,
+        "price_note": venue.estimate.note if venue.estimate else "",
     }
 
 
 def list_venues(session: Session) -> list[dict[str, object]]:
     venues = session.scalars(select(Venue).order_by(Venue.name)).unique().all()
     return sort_venue_payloads([venue_payload(venue) for venue in venues])
+
+
+def dashboard_payload(session: Session) -> dict[str, object]:
+    venues = list_venues(session)
+    priced = [
+        venue for venue in venues
+        if venue["price_minimum_eur"] is not None
+        or venue["price_maximum_eur"] is not None
+    ]
+    midpoints = [
+        (
+            float(venue["price_minimum_eur"] or venue["price_maximum_eur"])
+            + float(venue["price_maximum_eur"] or venue["price_minimum_eur"])
+        ) / 2
+        for venue in priced
+    ]
+    state = session.get(SystemState, "gmail_last_refresh")
+    return {
+        "venues": venues,
+        "last_refreshed_at": state.value if state else None,
+        "price_overview": {
+            "venue_count": len(priced),
+            "average_eur": round(sum(midpoints) / len(midpoints)) if midpoints else None,
+            "minimum_eur": round(min(
+                float(venue["price_minimum_eur"] or venue["price_maximum_eur"])
+                for venue in priced
+            )) if priced else None,
+            "maximum_eur": round(max(
+                float(venue["price_maximum_eur"] or venue["price_minimum_eur"])
+                for venue in priced
+            )) if priced else None,
+        },
+    }
+
+
+def set_system_state(session: Session, key: str, value: str) -> None:
+    state = session.get(SystemState, key) or SystemState(key=key)
+    state.value = value
+    session.add(state)
+    session.commit()
 
 
 def sort_venue_payloads(

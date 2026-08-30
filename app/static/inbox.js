@@ -6,6 +6,8 @@ const addVenueButton = document.querySelector("#addVenueButton");
 const venueFormPanel = document.querySelector("#venueFormPanel");
 const venueForm = document.querySelector("#venueForm");
 const venueFormMessage = document.querySelector("#venueFormMessage");
+const discoverForm = document.querySelector("#discoverForm");
+const discoverMessage = document.querySelector("#discoverMessage");
 const setupPanel = document.querySelector("#setupPanel");
 const trackedCount = document.querySelector("#trackedCount");
 const lastCheck = document.querySelector("#lastCheck");
@@ -13,10 +15,37 @@ const lastCheckDetail = document.querySelector("#lastCheckDetail");
 const trackerMessage = document.querySelector("#trackerMessage");
 const responseTableWrap = document.querySelector("#responseTableWrap");
 const responseRows = document.querySelector("#responseRows");
+const priceEstimate = document.querySelector("#priceEstimate");
+const priceEstimateDetail = document.querySelector("#priceEstimateDetail");
+const replyDialog = document.querySelector("#replyDialog");
+const replyForm = document.querySelector("#replyForm");
+const replyVenueName = document.querySelector("#replyVenueName");
+const replyMessage = document.querySelector("#replyMessage");
+const cancelReply = document.querySelector("#cancelReply");
+let replyVenueId = null;
 
 const formatDate = (value) => value
   ? new Date(value).toLocaleString([], {dateStyle: "medium", timeStyle: "short"})
   : "—";
+
+const formatEuro = (value) => new Intl.NumberFormat([], {
+  style: "currency", currency: "EUR", maximumFractionDigits: 0,
+}).format(value);
+
+const renderPriceOverview = (overview) => {
+  if (!overview?.venue_count) {
+    priceEstimate.textContent = "Not enough data";
+    priceEstimateDetail.textContent = "Based on 90 guests";
+    return;
+  }
+  priceEstimate.textContent = `${formatEuro(overview.average_eur)} average`;
+  priceEstimateDetail.textContent = `${formatEuro(overview.minimum_eur)}–${formatEuro(overview.maximum_eur)} across ${overview.venue_count} venues`;
+};
+
+const renderLastRefresh = (value) => {
+  lastCheck.textContent = value ? formatDate(value) : "Not yet";
+  lastCheckDetail.textContent = value ? "Last successful Gmail check" : "Use Check Gmail to refresh";
+};
 
 const renderVenues = (venues) => {
   responseRows.replaceChildren();
@@ -58,7 +87,39 @@ const renderVenues = (venues) => {
     pill.textContent = venue.status;
     status.append(pill);
 
-    row.append(identity, contact, sent, response, status);
+    const price = document.createElement("td");
+    price.className = "subject-cell";
+    if (venue.price_minimum_eur || venue.price_maximum_eur) {
+      const range = document.createElement("strong");
+      const minimum = venue.price_minimum_eur || venue.price_maximum_eur;
+      const maximum = venue.price_maximum_eur || venue.price_minimum_eur;
+      range.textContent = minimum === maximum
+        ? formatEuro(minimum)
+        : `${formatEuro(minimum)}–${formatEuro(maximum)}`;
+      const note = document.createElement("small");
+      note.textContent = venue.price_note || "Estimated for 90 guests";
+      price.append(range, note);
+    } else {
+      price.textContent = "—";
+    }
+
+    const actions = document.createElement("td");
+    if (venue.responded_at) {
+      const reply = document.createElement("button");
+      reply.className = "button button-secondary reply-button";
+      reply.type = "button";
+      reply.textContent = "Reply";
+      reply.addEventListener("click", () => {
+        replyVenueId = venue.id;
+        replyVenueName.textContent = `Reply to ${venue.name}`;
+        replyMessage.textContent = "";
+        replyForm.reset();
+        replyDialog.showModal();
+      });
+      actions.append(reply);
+    }
+
+    row.append(identity, contact, sent, response, price, status, actions);
     responseRows.append(row);
   });
   trackedCount.textContent = venues.length.toLocaleString();
@@ -72,8 +133,34 @@ const loadVenues = async () => {
   const result = await response.json();
   if (!response.ok) throw new Error(result.detail || "Could not load venues.");
   renderVenues(result.venues);
+  renderPriceOverview(result.price_overview);
+  renderLastRefresh(result.last_refreshed_at);
   return result.venues.length;
 };
+
+discoverForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  discoverMessage.textContent = "Looking for the venue contact…";
+  try {
+    const response = await fetch("/api/venues/discover", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({url: new FormData(discoverForm).get("url")}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Could not inspect that website.");
+    ["name", "location", "email", "website", "phone"].forEach((field) => {
+      venueForm.elements[field].value = result[field] || "";
+    });
+    discoverMessage.textContent = "Contact found. Review it, then choose Save venue or Save & send inquiry.";
+  } catch (error) {
+    discoverMessage.textContent = error instanceof Error ? error.message : "Could not inspect that website.";
+  } finally {
+    button.disabled = false;
+  }
+});
 
 addVenueButton.addEventListener("click", () => {
   venueFormPanel.hidden = !venueFormPanel.hidden;
@@ -113,7 +200,7 @@ syncButton.addEventListener("click", async () => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "Gmail check failed.");
     const count = await loadVenues();
-    lastCheck.textContent = "Just now";
+    lastCheck.textContent = formatDate(result.last_refreshed_at);
     lastCheckDetail.textContent = `${result.sent_confirmed} sent · ${result.replies_synthesized} new replies · ${count} venues`;
   } catch (error) {
     trackerMessage.hidden = false;
@@ -121,6 +208,30 @@ syncButton.addEventListener("click", async () => {
   } finally {
     syncButton.disabled = false;
     syncButton.firstChild.textContent = "Check Gmail ";
+  }
+});
+
+cancelReply.addEventListener("click", () => replyDialog.close());
+
+replyForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  replyMessage.textContent = "Sending reply…";
+  try {
+    const response = await fetch(`/api/venues/${replyVenueId}/reply`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({body: new FormData(replyForm).get("body")}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Could not send reply.");
+    replyDialog.close();
+    await loadVenues();
+  } catch (error) {
+    replyMessage.textContent = error instanceof Error ? error.message : "Could not send reply.";
+  } finally {
+    button.disabled = false;
   }
 });
 
@@ -133,7 +244,6 @@ const checkStatus = async () => {
     gmailBadge.classList.remove("badge-muted", "badge-offline");
     connectButton.hidden = true;
     syncButton.disabled = false;
-    lastCheckDetail.textContent = "Use Check Gmail to refresh";
   } else if (status.oauth_setup_ready) {
     gmailStatus.textContent = "Google not connected";
     connectButton.hidden = false;

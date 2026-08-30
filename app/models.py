@@ -184,3 +184,28 @@ class ResponseSynthesis(BaseModel):
         "unavailable",
         "needs_reply",
     ] = "responded"
+    estimated_total_min_eur: float | None = Field(default=None, ge=0)
+    estimated_total_max_eur: float | None = Field(default=None, ge=0)
+    price_note: str = Field(default="", max_length=300)
+
+
+class VenueReply(BaseModel):
+    """Human-written reply sent from the private dashboard."""
+
+    body: str = Field(min_length=1, max_length=10_000)
+
+
+class VenueDiscoveryRequest(BaseModel):
+    """Public venue website to inspect for contact details."""
+
+    url: str = Field(min_length=4, max_length=2_000)
+
+
+class VenueDiscovery(BaseModel):
+    """Contact details discovered from a public venue website."""
+
+    name: str = ""
+    location: str = ""
+    email: str = ""
+    website: str
+    phone: str = ""
