@@ -1,63 +1,100 @@
+<div align="center">
+
 # Wedding Venue Control Center
 
-A private FastAPI dashboard for managing wedding-venue outreach without manually tracking Gmail threads.
+**Private venue outreach, response tracking, and quote comparison for Kassia & Raphaël.**
 
-## Live deployment
+[Live app](https://rkwedding-az2zo.ondigitalocean.app) · [Health check](https://rkwedding-az2zo.ondigitalocean.app/health) · [Architecture](docs/ARCHITECTURE.md)
 
-The current `main` branch is deployed on DigitalOcean App Platform:
+![Python](https://img.shields.io/badge/Python-3.11%2B-173d2e?style=flat-square)
+![FastAPI](https://img.shields.io/badge/FastAPI-private_API-245843?style=flat-square)
+![DigitalOcean](https://img.shields.io/badge/DigitalOcean-App_Platform-0069ff?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-31_passing-dfe9df?style=flat-square&labelColor=245843)
 
-- App: [https://rkwedding-az2zo.ondigitalocean.app](https://rkwedding-az2zo.ondigitalocean.app)
-- Health check: [`/health`](https://rkwedding-az2zo.ondigitalocean.app/health)
-- Access: private HTTP Basic authentication configured in App Platform
-- Source: [`ralphieninefo/rkwedding`](https://github.com/ralphieninefo/rkwedding), branch `main`
+</div>
 
-The web service is live and healthy. The hosted environment still needs the existing DigitalOcean PostgreSQL database attached and the Google OAuth and Serverless Inference variables configured. Until then, Gmail synchronization, Kimi synthesis, and persistent venue data work locally but are not fully enabled on the hosted app. Never put production secret values in this README or the repository.
+---
 
-## Current workflow
+## What it does
 
-1. Add a venue in the dashboard.
-   You can paste its public website to discover the name, email, and phone, then review the result.
-2. Choose **Save venue** or **Save & send inquiry**. Sending only happens after the explicit send action.
-3. Use **Check Gmail** to reconcile sent messages and replies.
-4. The application stores the complete message privately, asks DigitalOcean Serverless Inference for a short English synthesis and 90-guest price estimate, and displays only that synthesis in the dashboard.
-5. Use **View reply in Gmail** to open the exact tracked conversation, read the full response, and answer there.
+The control center turns venue outreach into one tracked workflow:
 
-The application database stores workflow state and message history. The existing Google Sheet remains the reference source for venue metadata such as region, capacity, vibe, and notes; that metadata is refreshed during Gmail reconciliation.
+```text
+Add venue → Send inquiry → Track Gmail thread → Synthesize reply → Compare options
+```
 
-## What is implemented
+- Paste a venue website to discover its public contact details.
+- Save the venue or explicitly send the Italian inquiry email.
+- Match sent messages and replies to the correct Gmail thread.
+- Use DigitalOcean Serverless Inference to produce a concise English synthesis.
+- Track first outreach, latest activity, response state, and 90-guest pricing.
+- Open the exact Gmail conversation to read or answer the full reply.
+- Keep venue metadata aligned with the existing Google Sheet.
 
-- Venue form with name, region, location, email, website, and phone
-- Compact tracking dashboard with first outreach, latest English synthesis, workflow step, and direct Gmail link
-- Dashboard search and filters for response state, recently added venues, and recent Gmail activity
-- Separate searchable venue directory with contact details, metadata, pricing, and conversation history
-- Explicit draft/save-and-send actions
-- Exact-email Gmail matching and idempotent message ingestion
-- Sent and responded status tracking
-- Focused English Kimi response synthesis and price estimation through DigitalOcean Serverless Inference
-- Persistent last-successful Gmail refresh time
-- Human-written replies opened directly in the correct Gmail thread
-- Safe public website contact discovery with an explicit send confirmation
-- Full email bodies stored in the database but excluded from dashboard/API venue responses
-- SQLite for local development and PostgreSQL-compatible production storage
-- Initial Sheet import plus ongoing metadata refresh for tracked venues
+## Product surfaces
 
-PDF quote extraction is the next layer. The current milestone tracks and summarizes email replies; it does not yet write structured PDF pricing into the database.
+| Surface | Purpose |
+|---|---|
+| **Tracking** | Search and filter outreach by response state, date added, recent Gmail activity, or venue name. |
+| **All venues** | Reference directory for contacts, location, capacity, vibe, pricing, notes, and conversation history. |
+| **Gmail** | Source for complete messages and human-written replies. The app displays only concise syntheses. |
+| **Google Sheet** | Reference source for venue research and metadata. |
 
-## Local setup
+## Current status
 
-Requirements: Python 3.11 or newer.
+| Capability | Local | Hosted |
+|---|:---:|:---:|
+| Dashboard and venue directory | ✅ | ✅ |
+| Password-protected access | — | ✅ |
+| Gmail read/send | ✅ | Needs production OAuth |
+| Google Sheet metadata refresh | ✅ | Needs production OAuth |
+| Kimi reply synthesis | ✅ | Needs model credentials |
+| Persistent PostgreSQL storage | SQLite | Needs database attachment |
+| Text PDF extraction | Planned | Planned |
+
+The App Platform service is live and healthy at [rkwedding-az2zo.ondigitalocean.app](https://rkwedding-az2zo.ondigitalocean.app). Production secrets are intentionally not stored in Git.
+
+## Architecture
+
+```text
+                         ┌─────────────────────────┐
+                         │   Control Center UI     │
+                         │ Tracking · Directory   │
+                         └────────────┬────────────┘
+                                      │
+                                      ▼
+┌──────────────┐          ┌─────────────────────────┐          ┌─────────────────────┐
+│ Google Sheet │◀────────▶│       FastAPI app       │◀────────▶│ PostgreSQL / SQLite │
+│ Venue data   │          │ Rules · matching · API │          │ Workflow state      │
+└──────────────┘          └────────────┬────────────┘          └─────────────────────┘
+                                      │
+                         ┌────────────┴────────────┐
+                         ▼                         ▼
+                ┌─────────────────┐      ┌────────────────────┐
+                │    Gmail API    │      │ DO Serverless      │
+                │ Threads/replies │      │ Inference · Kimi   │
+                └─────────────────┘      └────────────────────┘
+```
+
+Application code owns sending rules, state, matching, and deduplication. The model has one bounded job: turn a venue response into a structured English summary and price estimate. A general-purpose autonomous agent is not required.
+
+## Run locally
+
+Requires Python 3.11 or newer.
 
 ```bash
-cp .env.example .env
+git clone https://github.com/ralphieninefo/rkwedding.git
+cd rkwedding
+
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+cp .env.example .env
 uvicorn app.main:app --reload --env-file .env --port 8001
 ```
 
-Open [http://127.0.0.1:8001](http://127.0.0.1:8001). API documentation is at `/docs`.
-
-To test:
+Open [http://127.0.0.1:8001](http://127.0.0.1:8001).
 
 ```bash
 pytest -q
@@ -65,66 +102,56 @@ pytest -q
 
 ## Configuration
 
-Copy `.env.example` to `.env` and enter credentials locally. Never commit `.env`, OAuth client JSON, refresh tokens, model keys, or the local `data/` directory.
+Keep local credentials in `.env`. Never commit `.env`, OAuth client JSON, refresh tokens, model keys, or the `data/` directory.
 
-Key settings:
+| Variable | Type | Purpose |
+|---|---|---|
+| `DATABASE_URL` | Secret | SQLite locally; PostgreSQL connection URL in production. |
+| `DIGITALOCEAN_MODEL_ACCESS_KEY` | Secret | Calls DigitalOcean Serverless Inference. |
+| `DIGITALOCEAN_MODEL_ID` | General | Exact model identifier, not the access-key name. |
+| `GOOGLE_CLIENT_ID` | General | Google OAuth application identifier. |
+| `GOOGLE_CLIENT_SECRET` | Secret | Google OAuth application secret. |
+| `GOOGLE_REFRESH_TOKEN` | Secret | Server-side Gmail and Sheets access. |
+| `GOOGLE_SPREADSHEET_ID` | General | Wedding venue master spreadsheet. |
+| `GOOGLE_VENUES_SHEET` | General | Venue tab name; defaults to `Venues`. |
+| `CONTROL_CENTER_PASSWORD` | Secret | Protects the hosted dashboard. |
 
-```dotenv
-# Local default. App Platform should use a managed PostgreSQL connection URL.
-DATABASE_URL=sqlite:///data/wedding.db
-
-DIGITALOCEAN_MODEL_ACCESS_KEY=
-DIGITALOCEAN_MODEL_ID=
-DIGITALOCEAN_INFERENCE_BASE_URL=https://inference.do-ai.run
-
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REFRESH_TOKEN=
-GOOGLE_SPREADSHEET_ID=
-GOOGLE_VENUES_SHEET=Venues
-
-# Keep disabled while testing.
-AUTO_SEND=false
-```
-
-The model access-key name shown in DigitalOcean is not the model ID. Use the exact model identifier supported by the inference endpoint.
-
-`DIGITALOCEAN_API_TOKEN` is separate. It is used by `doctl` or development tooling to manage DigitalOcean resources; the running wedding application does not need it.
-
-## Architecture
-
-```text
-Dashboard ──> FastAPI ──> SQLite locally / PostgreSQL in production
-                    │
-                    ├──> Gmail API: send and reconcile messages
-                    │
-                    ├──> Serverless Inference: concise reply synthesis
-                    │
-                    └──> Google Sheets: initial import + reference metadata refresh
-```
-
-Application code owns sending rules, state, matching, and deduplication. Kimi has one bounded job: convert a reply into a concise summary and status. This does not require a general-purpose autonomous agent.
+`DIGITALOCEAN_API_TOKEN` is only for `doctl` or infrastructure tooling. The running application does not use it for inference.
 
 ## Repository map
 
 ```text
-app/main.py              FastAPI routes and dashboard entry point
-app/database.py          Venue, outreach, and message persistence
-app/db_workflow.py       Save/send and Gmail reconciliation workflow
-app/gmail_oauth.py       Google OAuth connection
-app/gmail.py             Gmail API and message normalization
-app/inference.py         DigitalOcean reply synthesis
-app/sheets.py            Optional Google Sheet import client
-app/static/              Private control-center interface
-tests/                   Unit and API tests
+app/
+├── main.py          FastAPI routes and UI entry points
+├── database.py      Venue, outreach, message, and pricing models
+├── db_workflow.py   Gmail reconciliation and Sheet metadata sync
+├── gmail.py         Gmail API and message normalization
+├── gmail_oauth.py   Google OAuth flow
+├── inference.py     Structured reply synthesis
+├── sheets.py        Google Sheet integration
+└── static/          Tracking dashboard and venue directory
+
+tests/               API, workflow, integration, and scoring tests
+.do/app.yaml         DigitalOcean App Platform specification
 ```
 
-## Production next steps
+## Production checklist
 
-1. Attach the existing DigitalOcean Managed PostgreSQL database named `rkwedding` to the App Platform service and bind its connection URL as `DATABASE_URL`.
-2. Configure `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REFRESH_TOKEN` as App Platform runtime variables. Store secret values as encrypted secrets.
-3. Configure `DIGITALOCEAN_MODEL_ACCESS_KEY` as an encrypted secret and `DIGITALOCEAN_MODEL_ID` as a normal runtime value.
-4. Verify the hosted Google OAuth callback, import the existing Sheet metadata, and run one controlled Gmail reconciliation.
-5. Schedule Gmail reconciliation so replies appear without pressing **Check Gmail**.
-6. Add text-only PDF extraction and structured quote fields such as price, capacity, inclusions, and availability.
-7. Add ranking and visit scheduling after quote data is reliable.
+- [x] Deploy the FastAPI service from GitHub `main`.
+- [x] Protect the hosted control center with HTTP Basic authentication.
+- [x] Provision the `rkwedding` DigitalOcean PostgreSQL database.
+- [ ] Attach PostgreSQL to the App Platform service as `DATABASE_URL`.
+- [ ] Add encrypted Google OAuth runtime secrets.
+- [ ] Add the encrypted model access key and model ID.
+- [ ] Verify one hosted Gmail reconciliation with a controlled venue thread.
+- [ ] Schedule reconciliation so replies appear automatically.
+- [ ] Add text-only PDF extraction for quote attachments.
+- [ ] Add venue ranking and visit scheduling after quote data is reliable.
+
+## Safety rules
+
+- Sending requires an explicit user action.
+- Full email bodies stay in the database and are excluded from venue API responses.
+- The dashboard opens Gmail for human-written replies instead of autonomously negotiating.
+- Credentials remain outside Git and must be encrypted in App Platform.
+- Reconciliation is idempotent: the same Gmail message is not processed twice.
