@@ -2,7 +2,7 @@ name: rkwedding
 region: nyc
 databases:
   - engine: PG
-    name: wedding-db
+    name: rkwedding
     production: true
 services:
   - name: web
@@ -24,7 +24,7 @@ services:
         scope: RUN_TIME
         type: GENERAL
       - key: DATABASE_URL
-        value: ${wedding-db.DATABASE_URL}
+        value: ${rkwedding.DATABASE_URL}
         scope: RUN_TIME
         type: SECRET
       - key: GOOGLE_SPREADSHEET_ID
@@ -47,5 +47,26 @@ services:
       # Required: fill this encrypted value in the App Platform UI before deploy.
       - key: CONTROL_CENTER_PASSWORD
         value: ""
+        scope: RUN_TIME
+        type: SECRET
+jobs:
+  - name: gmail-sync
+    kind: SCHEDULED
+    schedule:
+      cron: "*/15 * * * *"
+      time_zone: America/Los_Angeles
+    git:
+      repo_clone_url: https://github.com/ralphieninefo/rkwedding.git
+      branch: main
+    environment_slug: python
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    run_command: python -m app.scheduled_sync
+    envs:
+      - key: APP_ENV
+        value: production
+        scope: RUN_TIME
+        type: GENERAL
+      - key: DATABASE_URL
+        value: ${rkwedding.DATABASE_URL}
         scope: RUN_TIME
         type: SECRET
