@@ -281,3 +281,9 @@ checkStatus().catch(() => {
   gmailStatus.textContent = "Local service unavailable";
   gmailBadge.classList.add("badge-offline");
 });
+
+window.setInterval(() => {
+  loadVenues().catch(() => {
+    // Keep the last successfully rendered data and try again in one minute.
+  });
+}, 60_000);
