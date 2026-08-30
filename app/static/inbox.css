@@ -274,6 +274,86 @@
   white-space: nowrap;
 }
 
+.outreach-dialog {
+  width: min(720px, calc(100% - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 30px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: #fffefb;
+  box-shadow: 0 34px 100px rgba(23, 32, 28, 0.28);
+}
+
+.outreach-dialog::backdrop {
+  background: rgba(15, 25, 20, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.outreach-dialog-heading,
+.outreach-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.outreach-dialog-heading h2 {
+  margin-bottom: 0;
+}
+
+.dialog-close {
+  width: 42px;
+  height: 42px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.outreach-preview-fields {
+  display: grid;
+  gap: 16px;
+  margin: 28px 0 18px;
+}
+
+.outreach-preview-fields label {
+  display: grid;
+  gap: 7px;
+}
+
+.outreach-preview-fields label > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.outreach-preview-fields input,
+.outreach-preview-fields textarea {
+  width: 100%;
+  padding: 13px 15px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+
+.outreach-preview-fields textarea {
+  min-height: 280px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.outreach-dialog-actions {
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+
 @media (max-width: 800px) {
   .site-header {
     flex-wrap: wrap;

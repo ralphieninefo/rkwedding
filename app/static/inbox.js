@@ -20,7 +20,17 @@ const priceEstimateDetail = document.querySelector("#priceEstimateDetail");
 const venueFilter = document.querySelector("#venueFilter");
 const responseFilter = document.querySelector("#responseFilter");
 const venueSort = document.querySelector("#venueSort");
+const outreachDialog = document.querySelector("#outreachDialog");
+const closeOutreachDialog = document.querySelector("#closeOutreachDialog");
+const cancelOutreach = document.querySelector("#cancelOutreach");
+const confirmOutreach = document.querySelector("#confirmOutreach");
+const outreachRecipient = document.querySelector("#outreachRecipient");
+const outreachSubject = document.querySelector("#outreachSubject");
+const outreachBody = document.querySelector("#outreachBody");
+const outreachDialogMessage = document.querySelector("#outreachDialogMessage");
 let allVenues = [];
+let pendingOutreachVenue = null;
+let pendingOutreachButton = null;
 
 const formatDate = (value) => value
   ? new Date(value).toLocaleString([], {dateStyle: "medium", timeStyle: "short"})
@@ -116,26 +126,23 @@ const renderVenues = (venues) => {
       send.type = "button";
       send.textContent = "Send inquiry";
       send.addEventListener("click", async () => {
-        const confirmed = window.confirm(
-          `Send the standard Italian wedding inquiry to ${venue.name} (${venue.email})?`,
-        );
-        if (!confirmed) return;
         send.disabled = true;
-        send.textContent = "Sending…";
+        send.textContent = "Loading…";
         try {
-          const response = await fetch(`/api/venues/${venue.id}/send`, {method: "POST"});
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.detail || "Could not send inquiry.");
-          trackerMessage.hidden = false;
-          trackerMessage.textContent = result.sent
-            ? `Inquiry sent to ${venue.name}.`
-            : `No duplicate sent. Gmail already has a conversation with ${venue.name}.`;
-          await loadVenues();
+          const response = await fetch(`/api/venues/${venue.id}/outreach-preview`);
+          const preview = await response.json();
+          if (!response.ok) throw new Error(preview.detail || "Could not load inquiry.");
+          pendingOutreachVenue = venue;
+          pendingOutreachButton = send;
+          outreachRecipient.value = preview.recipient;
+          outreachSubject.value = preview.subject;
+          outreachBody.value = preview.body;
+          outreachDialogMessage.textContent = "";
+          outreachDialog.showModal();
         } catch (error) {
           trackerMessage.hidden = false;
           trackerMessage.textContent = error instanceof Error
-            ? error.message
-            : "Could not send inquiry.";
+            ? error.message : "Could not load inquiry.";
           send.disabled = false;
           send.textContent = "Send inquiry";
         }
@@ -163,6 +170,49 @@ const renderVenues = (venues) => {
     ? "No venues match these filters."
     : "No venues yet. Add one above.";
 };
+
+const closePreview = () => outreachDialog.close();
+
+closeOutreachDialog.addEventListener("click", closePreview);
+cancelOutreach.addEventListener("click", closePreview);
+
+outreachDialog.addEventListener("close", () => {
+  if (pendingOutreachButton) {
+    pendingOutreachButton.disabled = false;
+    pendingOutreachButton.textContent = "Send inquiry";
+  }
+  pendingOutreachVenue = null;
+  pendingOutreachButton = null;
+  confirmOutreach.disabled = false;
+  confirmOutreach.textContent = "Send inquiry";
+  outreachDialogMessage.textContent = "";
+});
+
+confirmOutreach.addEventListener("click", async () => {
+  if (!pendingOutreachVenue) return;
+  confirmOutreach.disabled = true;
+  confirmOutreach.textContent = "Sending…";
+  outreachDialogMessage.textContent = "Sending through Gmail…";
+  try {
+    const response = await fetch(`/api/venues/${pendingOutreachVenue.id}/send`, {
+      method: "POST",
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Could not send inquiry.");
+    const venueName = pendingOutreachVenue.name;
+    outreachDialog.close();
+    trackerMessage.hidden = false;
+    trackerMessage.textContent = result.sent
+      ? `Inquiry sent to ${venueName}.`
+      : `No duplicate sent. Gmail already has a conversation with ${venueName}.`;
+    await loadVenues();
+  } catch (error) {
+    outreachDialogMessage.textContent = error instanceof Error
+      ? error.message : "Could not send inquiry.";
+    confirmOutreach.disabled = false;
+    confirmOutreach.textContent = "Send inquiry";
+  }
+});
 
 [venueFilter, responseFilter, venueSort].forEach((control) => {
   control.addEventListener("input", applyFilters);

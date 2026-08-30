@@ -147,6 +147,21 @@ async def create_venue_and_optionally_send(
     return await send_venue_inquiry(settings, venue_id)
 
 
+def outreach_preview(venue_id: int) -> dict[str, object]:
+    """Return the exact initial message without sending anything."""
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        return {
+            "id": venue.id,
+            "venue": venue.name,
+            "recipient": venue.email,
+            "subject": OUTREACH_SUBJECT,
+            "body": OUTREACH_BODY,
+        }
+
+
 async def send_venue_inquiry(
     settings: Settings, venue_id: int
 ) -> dict[str, object]:

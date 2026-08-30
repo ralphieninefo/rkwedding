@@ -242,6 +242,17 @@ async def send_venue(venue_id: int) -> dict[str, object]:
         raise HTTPException(status_code=502, detail="Gmail could not send the inquiry.") from exc
 
 
+@app.get("/api/venues/{venue_id}/outreach-preview")
+async def preview_venue_outreach(venue_id: int) -> dict[str, object]:
+    """Show the exact standard inquiry before the user chooses to send it."""
+    from app.db_workflow import outreach_preview
+
+    try:
+        return outreach_preview(venue_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/api/import/sheet")
 async def import_existing_sheet() -> dict[str, int]:
     """Copy valid venue contacts into the database; never modify the Sheet."""

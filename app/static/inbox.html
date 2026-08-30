@@ -97,10 +97,30 @@
       </section>
     </main>
 
+    <dialog class="outreach-dialog" id="outreachDialog" aria-labelledby="outreachDialogTitle">
+      <div class="outreach-dialog-heading">
+        <div>
+          <p class="eyebrow">Review before sending</p>
+          <h2 id="outreachDialogTitle">Venue inquiry</h2>
+        </div>
+        <button class="dialog-close" id="closeOutreachDialog" type="button" aria-label="Close preview">×</button>
+      </div>
+      <div class="outreach-preview-fields">
+        <label><span>To</span><input id="outreachRecipient" type="text" readonly></label>
+        <label><span>Subject</span><input id="outreachSubject" type="text" readonly></label>
+        <label class="outreach-message"><span>Message</span><textarea id="outreachBody" readonly></textarea></label>
+      </div>
+      <p class="form-message" id="outreachDialogMessage" role="status"></p>
+      <div class="outreach-dialog-actions">
+        <button class="button button-secondary" id="cancelOutreach" type="button">Cancel</button>
+        <button class="button button-primary" id="confirmOutreach" type="button">Send inquiry</button>
+      </div>
+    </dialog>
+
     <footer class="site-footer">
       <span>Control center · Private app database</span>
       <a href="/venues">Full venue directory ↗</a>
     </footer>
-    <script src="/static/inbox.js?v=20260830-2" defer></script>
+    <script src="/static/inbox.js?v=20260830-3" defer></script>
   </body>
 </html>

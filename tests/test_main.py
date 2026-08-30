@@ -81,6 +81,25 @@ def test_saved_draft_can_be_sent(monkeypatch) -> None:
     assert response.json() == {"id": 13, "status": "Sent", "sent": True}
 
 
+def test_saved_draft_message_can_be_previewed(monkeypatch) -> None:
+    def fake_preview(venue_id):
+        return {
+            "id": venue_id,
+            "venue": "Villa Test",
+            "recipient": "info@example.com",
+            "subject": "Richiesta informazioni",
+            "body": "Buongiorno",
+        }
+
+    monkeypatch.setattr("app.db_workflow.outreach_preview", fake_preview)
+
+    response = client.get("/api/venues/13/outreach-preview")
+
+    assert response.status_code == 200
+    assert response.json()["recipient"] == "info@example.com"
+    assert response.json()["body"] == "Buongiorno"
+
+
 def test_hosted_dashboard_requires_password(monkeypatch) -> None:
     settings = Settings(
         _env_file=None,
