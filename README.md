@@ -2,6 +2,17 @@
 
 A private FastAPI dashboard for managing wedding-venue outreach without manually tracking Gmail threads.
 
+## Live deployment
+
+The current `main` branch is deployed on DigitalOcean App Platform:
+
+- App: [https://rkwedding-az2zo.ondigitalocean.app](https://rkwedding-az2zo.ondigitalocean.app)
+- Health check: [`/health`](https://rkwedding-az2zo.ondigitalocean.app/health)
+- Access: private HTTP Basic authentication configured in App Platform
+- Source: [`ralphieninefo/rkwedding`](https://github.com/ralphieninefo/rkwedding), branch `main`
+
+The web service is live and healthy. The hosted environment still needs the existing DigitalOcean PostgreSQL database attached and the Google OAuth and Serverless Inference variables configured. Until then, Gmail synchronization, Kimi synthesis, and persistent venue data work locally but are not fully enabled on the hosted app. Never put production secret values in this README or the repository.
+
 ## Current workflow
 
 1. Add a venue in the dashboard.
@@ -110,8 +121,10 @@ tests/                   Unit and API tests
 
 ## Production next steps
 
-1. Provision DigitalOcean Managed PostgreSQL and set `DATABASE_URL` as an App Platform secret.
-2. Deploy this version of the app and configure Google OAuth secrets for the hosted callback URL.
-3. Run Gmail reconciliation on a schedule so replies appear without pressing **Check Gmail**.
-4. Add text-only PDF extraction and structured quote fields such as price, capacity, inclusions, and availability.
-5. Add ranking and visit scheduling after quote data is reliable.
+1. Attach the existing DigitalOcean Managed PostgreSQL database named `rkwedding` to the App Platform service and bind its connection URL as `DATABASE_URL`.
+2. Configure `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REFRESH_TOKEN` as App Platform runtime variables. Store secret values as encrypted secrets.
+3. Configure `DIGITALOCEAN_MODEL_ACCESS_KEY` as an encrypted secret and `DIGITALOCEAN_MODEL_ID` as a normal runtime value.
+4. Verify the hosted Google OAuth callback, import the existing Sheet metadata, and run one controlled Gmail reconciliation.
+5. Schedule Gmail reconciliation so replies appear without pressing **Check Gmail**.
+6. Add text-only PDF extraction and structured quote fields such as price, capacity, inclusions, and availability.
+7. Add ranking and visit scheduling after quote data is reliable.
