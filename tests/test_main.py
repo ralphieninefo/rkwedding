@@ -16,7 +16,11 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def allow_local_dashboard(monkeypatch):
-    settings = Settings(_env_file=None, allow_unauthenticated_local=True)
+    settings = Settings(
+        _env_file=None,
+        allow_unauthenticated_local=True,
+        google_sheet_webhook_token=SecretStr("test-webhook-token"),
+    )
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
 
@@ -82,7 +86,7 @@ def test_startup_rejects_missing_dashboard_password(monkeypatch) -> None:
             pass
 
 
-def test_gmail_event_returns_placeholder_decision(monkeypatch) -> None:
+def test_gmail_event_accepts_correct_token(monkeypatch) -> None:
     async def fake_analyze_event(_event):
         return {
             "venue": "Villa Test",
@@ -93,7 +97,7 @@ def test_gmail_event_returns_placeholder_decision(monkeypatch) -> None:
 
     monkeypatch.setattr("app.main.analyze_event", fake_analyze_event)
     response = client.post(
-        "/events/gmail",
+        "/events/gmail?token=test-webhook-token",
         json={
             "venue": "Villa Test",
             "message": "Il prezzo è €28.000 per 90 persone.",
@@ -102,6 +106,30 @@ def test_gmail_event_returns_placeholder_decision(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["recommended_action"] == "connect_serverless_inference"
+
+
+@pytest.mark.parametrize("token", [None, "wrong-token"])
+def test_gmail_event_rejects_missing_or_wrong_token(token) -> None:
+    suffix = f"?token={token}" if token else ""
+
+    response = client.post(
+        f"/events/gmail{suffix}",
+        json={"venue": "Villa Test", "message": "Preventivo"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_gmail_event_requires_configured_token(monkeypatch) -> None:
+    settings = Settings(_env_file=None, allow_unauthenticated_local=True)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    response = client.post(
+        "/events/gmail?token=anything",
+        json={"venue": "Villa Test", "message": "Preventivo"},
+    )
+
+    assert response.status_code == 503
 
 
 def test_gmail_push_decodes_pubsub_message() -> None:

@@ -339,8 +339,21 @@ async def health() -> dict[str, str]:
 
 
 @app.post("/events/gmail", response_model=AgentDecision)
-async def handle_gmail_event(event: GmailEvent) -> AgentDecision:
+async def handle_gmail_event(
+    event: GmailEvent,
+    token: str | None = Query(default=None),
+) -> AgentDecision:
     """Accept a normalized Gmail event for local phase-one testing."""
+    expected = get_settings().google_sheet_webhook_token
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="Gmail event webhook token is not configured.",
+        )
+    if token is None or not secrets.compare_digest(
+        token, expected.get_secret_value()
+    ):
+        raise HTTPException(status_code=401, detail="Invalid Gmail event token.")
     try:
         return await analyze_event(event)
     except httpx.HTTPError as exc:
