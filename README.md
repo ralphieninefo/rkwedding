@@ -9,7 +9,7 @@ A private FastAPI dashboard for managing wedding-venue outreach without manually
 2. Choose **Save venue** or **Save & send inquiry**. Sending only happens after the explicit send action.
 3. Use **Check Gmail** to reconcile sent messages and replies.
 4. The application stores the complete message privately, asks DigitalOcean Serverless Inference for a short English synthesis and 90-guest price estimate, and displays only that synthesis in the dashboard.
-5. Use **Reply in Gmail** to open the correct tracked thread and answer there.
+5. Use **View reply in Gmail** to open the exact tracked conversation, read the full response, and answer there.
 
 The application database stores workflow state and message history. The existing Google Sheet remains the reference source for venue metadata such as region, capacity, vibe, and notes; that metadata is refreshed during Gmail reconciliation.
 

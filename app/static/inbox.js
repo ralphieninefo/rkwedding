@@ -83,7 +83,9 @@ const renderVenues = (venues) => {
       reply.href = venue.gmail_url;
       reply.target = "_blank";
       reply.rel = "noopener";
-      reply.textContent = venue.responded_at ? "Reply in Gmail" : "Open Gmail";
+      reply.textContent = venue.responded_at
+        ? "View reply in Gmail"
+        : "Open in Gmail";
       actions.append(reply);
     }
 
