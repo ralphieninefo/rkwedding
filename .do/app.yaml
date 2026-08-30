@@ -35,6 +35,11 @@ services:
         value: Venues
         scope: RUN_TIME
         type: GENERAL
+      # Paste the complete OAuth client JSON as an encrypted value in the UI.
+      - key: GOOGLE_CLIENT_SECRET_JSON
+        value: ""
+        scope: RUN_TIME
+        type: SECRET
       - key: CONTROL_CENTER_USERNAME
         value: raph
         scope: RUN_TIME

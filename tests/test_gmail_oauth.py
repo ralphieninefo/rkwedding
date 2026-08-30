@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import gmail_oauth
+from app.config import Settings
 from app.database import Base, get_system_state, set_system_state
 
 
@@ -44,6 +45,7 @@ def test_legacy_token_is_imported_only_when_database_is_empty(
         set_system_state(session, gmail_oauth.TOKEN_STATE_KEY, '{"token":"database"}')
     gmail_oauth.TOKEN_PATH.write_text('{"token":"changed"}', encoding="utf-8")
 
+    assert gmail_oauth._stored_token() == '{"token":"database"}'
     with sessions() as session:
         assert get_system_state(session, gmail_oauth.TOKEN_STATE_KEY) == (
             '{"token":"database"}'
@@ -80,3 +82,30 @@ def test_refresh_persists_updated_credential(tmp_path, monkeypatch) -> None:
         assert json.loads(
             get_system_state(session, gmail_oauth.TOKEN_STATE_KEY)
         ) == {"token": "refreshed"}
+
+
+def test_client_secret_json_is_preferred_over_local_file(monkeypatch) -> None:
+    settings = Settings(
+        _env_file=None,
+        google_client_secret_json='{"web":{"client_id":"hosted-client"}}',
+    )
+    monkeypatch.setattr(gmail_oauth, "get_settings", lambda: settings)
+
+    captured = {}
+
+    class FakeFlow:
+        @staticmethod
+        def from_client_config(client_config, **kwargs):
+            captured["config"] = client_config
+            captured["kwargs"] = kwargs
+            return "flow-from-json"
+
+        @staticmethod
+        def from_client_secrets_file(*_args, **_kwargs):
+            raise AssertionError("The client file fallback should not be used.")
+
+    monkeypatch.setattr(gmail_oauth, "Flow", FakeFlow)
+
+    assert gmail_oauth.oauth_setup_ready() is True
+    assert gmail_oauth._flow(state="state") == "flow-from-json"
+    assert captured["config"]["web"]["client_id"] == "hosted-client"

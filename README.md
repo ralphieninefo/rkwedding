@@ -6,10 +6,10 @@
 
 [Live app](https://rkwedding-az2zo.ondigitalocean.app) · [Health check](https://rkwedding-az2zo.ondigitalocean.app/health) · [Architecture](docs/ARCHITECTURE.md)
 
-![Python](https://img.shields.io/badge/Python-3.11%2B-173d2e?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.12-173d2e?style=flat-square)
 ![FastAPI](https://img.shields.io/badge/FastAPI-private_API-245843?style=flat-square)
 ![DigitalOcean](https://img.shields.io/badge/DigitalOcean-App_Platform-0069ff?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-31_passing-dfe9df?style=flat-square&labelColor=245843)
+![Tests](https://img.shields.io/badge/tests-43_passing-dfe9df?style=flat-square&labelColor=245843)
 
 </div>
 
@@ -49,7 +49,7 @@ Add venue → Send inquiry → Track Gmail thread → Synthesize reply → Compa
 | Gmail read/send | ✅ | Needs production OAuth |
 | Google Sheet metadata refresh | ✅ | Needs production OAuth |
 | Kimi reply synthesis | ✅ | Needs model credentials |
-| Persistent PostgreSQL storage | SQLite | Needs database attachment |
+| Persistent storage | SQLite | Managed PostgreSQL configured in the app spec |
 | Text PDF extraction | Planned | Planned |
 
 The App Platform service is live and healthy at [rkwedding-az2zo.ondigitalocean.app](https://rkwedding-az2zo.ondigitalocean.app). Production secrets are intentionally not stored in Git.
@@ -80,7 +80,7 @@ Application code owns sending rules, state, matching, and deduplication. The mod
 
 ## Run locally
 
-Requires Python 3.11 or newer.
+Requires Python 3.12.
 
 ```bash
 git clone https://github.com/ralphieninefo/rkwedding.git
@@ -106,17 +106,30 @@ Keep local credentials in `.env`. Never commit `.env`, OAuth client JSON, refres
 
 | Variable | Type | Purpose |
 |---|---|---|
-| `DATABASE_URL` | Secret | SQLite locally; PostgreSQL connection URL in production. |
+| `APP_ENV` | General | Defaults to `local`; the hosted app must set `production`. |
+| `ALLOW_UNAUTHENTICATED_LOCAL` | General | Allows password-free local use only. Never enable it on the hosted app. |
+| `DATABASE_URL` | Secret | SQLite locally; a PostgreSQL connection URL is mandatory outside local mode. |
 | `DIGITALOCEAN_MODEL_ACCESS_KEY` | Secret | Calls DigitalOcean Serverless Inference. |
 | `DIGITALOCEAN_MODEL_ID` | General | Exact model identifier, not the access-key name. |
 | `GOOGLE_CLIENT_ID` | General | Google OAuth application identifier. |
 | `GOOGLE_CLIENT_SECRET` | Secret | Google OAuth application secret. |
+| `GOOGLE_CLIENT_SECRET_JSON` | Secret | Complete Google OAuth client JSON for hosted deployments; preferred over the local client file. |
 | `GOOGLE_REFRESH_TOKEN` | Secret | Server-side Gmail and Sheets access. |
 | `GOOGLE_SPREADSHEET_ID` | General | Wedding venue master spreadsheet. |
 | `GOOGLE_VENUES_SHEET` | General | Venue tab name; defaults to `Venues`. |
 | `CONTROL_CENTER_PASSWORD` | Secret | Protects the hosted dashboard. |
 
 `DIGITALOCEAN_API_TOKEN` is only for `doctl` or infrastructure tooling. The running application does not use it for inference.
+
+Google's refreshable OAuth credential is stored in the database under
+`google_oauth_token`, so Gmail stays connected across container restarts. If an
+older `data/google_token.json` is present while the database is empty, it is
+imported once; the database is authoritative after that.
+
+The application refuses to start with SQLite whenever `APP_ENV` is not `local`.
+Production therefore requires the managed PostgreSQL binding configured in
+`.do/app.yaml`. It also refuses to start without `CONTROL_CENTER_PASSWORD`
+unless the local-only bypass is explicitly enabled.
 
 ## Repository map
 
@@ -126,7 +139,7 @@ app/
 ├── database.py      Venue, outreach, message, and pricing models
 ├── db_workflow.py   Gmail reconciliation and Sheet metadata sync
 ├── gmail.py         Gmail API and message normalization
-├── gmail_oauth.py   Google OAuth flow
+├── gmail_oauth.py   Google OAuth flow and database-backed token lifecycle
 ├── inference.py     Structured reply synthesis
 ├── sheets.py        Google Sheet integration
 └── static/          Tracking dashboard and venue directory
@@ -139,8 +152,8 @@ tests/               API, workflow, integration, and scoring tests
 
 - [x] Deploy the FastAPI service from GitHub `main`.
 - [x] Protect the hosted control center with HTTP Basic authentication.
-- [x] Provision the `rkwedding` DigitalOcean PostgreSQL database.
-- [ ] Attach PostgreSQL to the App Platform service as `DATABASE_URL`.
+- [x] Define managed PostgreSQL and its `DATABASE_URL` binding in the app spec.
+- [ ] Fill the encrypted `CONTROL_CENTER_PASSWORD` placeholder in App Platform.
 - [ ] Add encrypted Google OAuth runtime secrets.
 - [ ] Add the encrypted model access key and model ID.
 - [ ] Verify one hosted Gmail reconciliation with a controlled venue thread.
