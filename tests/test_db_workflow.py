@@ -83,7 +83,11 @@ def test_venues_are_ordered_by_latest_response() -> None:
 
 
 def test_venue_payload_uses_first_outreach_and_links_latest_thread() -> None:
-    venue = Venue(name="Villa Test", email="info@example.com")
+    venue = Venue(
+        name="Villa Test",
+        email="info@example.com",
+        created_at=datetime(2026, 8, 27, 12),
+    )
     venue.outreach = [
         Outreach(
             gmail_message_id="sent-2",
@@ -108,4 +112,16 @@ def test_venue_payload_uses_first_outreach_and_links_latest_thread() -> None:
     payload = venue_payload(venue)
 
     assert payload["sent_at"].startswith("2026-08-28")
+    assert payload["created_at"].startswith("2026-08-27")
+    assert payload["last_activity_at"].startswith("2026-08-29")
     assert payload["gmail_url"].endswith("/thread-1")
+
+
+def test_draft_creation_is_not_counted_as_message_activity() -> None:
+    venue = Venue(
+        name="Draft Venue",
+        email="draft@example.com",
+        created_at=datetime(2026, 8, 29, 12),
+    )
+
+    assert venue_payload(venue)["last_activity_at"] is None

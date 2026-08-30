@@ -17,6 +17,7 @@ The application database stores workflow state and message history. The existing
 
 - Venue form with name, region, location, email, website, and phone
 - Compact tracking dashboard with first outreach, latest English synthesis, workflow step, and direct Gmail link
+- Dashboard search and filters for response state, recently added venues, and recent Gmail activity
 - Separate searchable venue directory with contact details, metadata, pricing, and conversation history
 - Explicit draft/save-and-send actions
 - Exact-email Gmail matching and idempotent message ingestion

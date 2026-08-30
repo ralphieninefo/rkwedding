@@ -189,6 +189,34 @@
   font-size: 14px;
 }
 
+.tracker-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(170px, 0.35fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.tracker-filters span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tracker-filters input,
+.tracker-filters select {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--ink);
+}
+
 .response-table-wrap {
   overflow-x: auto;
 }
@@ -280,5 +308,9 @@
 
   .response-panel {
     padding: 22px;
+  }
+
+  .tracker-filters {
+    grid-template-columns: 1fr;
   }
 }

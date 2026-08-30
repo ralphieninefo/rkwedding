@@ -82,10 +82,15 @@
         <div class="panel-heading compact">
           <div><p class="eyebrow">Database-backed tracker</p><h2 id="responsesTitle">Venue outreach</h2></div>
         </div>
+        <div class="tracker-filters" aria-label="Venue filters">
+          <label><span>Find venue</span><input id="venueFilter" type="search" placeholder="Search name or region…"></label>
+          <label><span>Show</span><select id="responseFilter"><option value="all">All venues</option><option value="responded">Has responded</option><option value="waiting">Waiting for response</option><option value="action">Needs action</option><option value="draft">Drafts</option></select></label>
+          <label><span>Order by</span><select id="venueSort"><option value="activity">Recently messaged</option><option value="added">Recently added</option><option value="reply">Recent replies</option><option value="name">Venue name</option></select></label>
+        </div>
         <div class="tracker-message" id="trackerMessage">No venues yet. Add one above.</div>
         <div class="response-table-wrap" id="responseTableWrap" hidden>
           <table class="response-table">
-            <thead><tr><th>Venue</th><th>Region</th><th>First email sent</th><th>English response synthesis</th><th>Step</th><th></th></tr></thead>
+            <thead><tr><th>Venue</th><th>Region</th><th>Date added</th><th>First email sent</th><th>English response synthesis</th><th>Step</th><th></th></tr></thead>
             <tbody id="responseRows"></tbody>
           </table>
         </div>
@@ -96,6 +101,6 @@
       <span>Control center · Private app database</span>
       <a href="/venues">Full venue directory ↗</a>
     </footer>
-    <script src="/static/inbox.js?v=20260829-2" defer></script>
+    <script src="/static/inbox.js?v=20260829-3" defer></script>
   </body>
 </html>

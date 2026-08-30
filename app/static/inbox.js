@@ -17,6 +17,10 @@ const responseTableWrap = document.querySelector("#responseTableWrap");
 const responseRows = document.querySelector("#responseRows");
 const priceEstimate = document.querySelector("#priceEstimate");
 const priceEstimateDetail = document.querySelector("#priceEstimateDetail");
+const venueFilter = document.querySelector("#venueFilter");
+const responseFilter = document.querySelector("#responseFilter");
+const venueSort = document.querySelector("#venueSort");
+let allVenues = [];
 
 const formatDate = (value) => value
   ? new Date(value).toLocaleString([], {dateStyle: "medium", timeStyle: "short"})
@@ -41,6 +45,32 @@ const renderLastRefresh = (value) => {
   lastCheckDetail.textContent = value ? "Last successful Gmail check" : "Use Check Gmail to refresh";
 };
 
+const timestamp = (value) => value ? new Date(value).getTime() : 0;
+
+const filteredVenues = () => {
+  const query = venueFilter.value.trim().toLocaleLowerCase();
+  const filter = responseFilter.value;
+  const venues = allVenues.filter((venue) => {
+    const matchesQuery = !query || [venue.name, venue.region, venue.location]
+      .some((value) => String(value || "").toLocaleLowerCase().includes(query));
+    const status = venue.status.toLocaleLowerCase();
+    const matchesState = filter === "all"
+      || (filter === "responded" && Boolean(venue.responded_at))
+      || (filter === "waiting" && Boolean(venue.sent_at) && !venue.responded_at)
+      || (filter === "action" && ["more info needed", "quote received", "viewing offered"].includes(status))
+      || (filter === "draft" && status === "draft");
+    return matchesQuery && matchesState;
+  });
+  return venues.sort((left, right) => {
+    if (venueSort.value === "name") return left.name.localeCompare(right.name);
+    if (venueSort.value === "added") return timestamp(right.created_at) - timestamp(left.created_at);
+    if (venueSort.value === "reply") return timestamp(right.responded_at) - timestamp(left.responded_at);
+    return timestamp(right.last_activity_at) - timestamp(left.last_activity_at);
+  });
+};
+
+const applyFilters = () => renderVenues(filteredVenues());
+
 const renderVenues = (venues) => {
   responseRows.replaceChildren();
   venues.forEach((venue) => {
@@ -59,6 +89,9 @@ const renderVenues = (venues) => {
 
     const sent = document.createElement("td");
     sent.textContent = formatDate(venue.sent_at);
+
+    const added = document.createElement("td");
+    added.textContent = formatDate(venue.created_at);
 
     const response = document.createElement("td");
     response.className = "subject-cell";
@@ -89,20 +122,27 @@ const renderVenues = (venues) => {
       actions.append(reply);
     }
 
-    row.append(identity, region, sent, response, status, actions);
+    row.append(identity, region, added, sent, response, status, actions);
     responseRows.append(row);
   });
-  trackedCount.textContent = venues.length.toLocaleString();
+  trackedCount.textContent = allVenues.length.toLocaleString();
   trackerMessage.hidden = venues.length > 0;
   responseTableWrap.hidden = venues.length === 0;
-  if (!venues.length) trackerMessage.textContent = "No venues yet. Add one above.";
+  if (!venues.length) trackerMessage.textContent = allVenues.length
+    ? "No venues match these filters."
+    : "No venues yet. Add one above.";
 };
+
+[venueFilter, responseFilter, venueSort].forEach((control) => {
+  control.addEventListener("input", applyFilters);
+});
 
 const loadVenues = async () => {
   const response = await fetch("/api/venues");
   const result = await response.json();
   if (!response.ok) throw new Error(result.detail || "Could not load venues.");
-  renderVenues(result.venues);
+  allVenues = result.venues;
+  applyFilters();
   renderPriceOverview(result.price_overview);
   renderLastRefresh(result.last_refreshed_at);
   return result.venues.length;

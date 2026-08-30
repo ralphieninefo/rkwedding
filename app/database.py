@@ -183,12 +183,20 @@ def venue_payload(venue: Venue) -> dict[str, object]:
     first_outreach = min(
         venue.outreach, key=lambda item: item.sent_at, default=None
     )
+    latest_outreach = max(
+        venue.outreach, key=lambda item: item.sent_at, default=None
+    )
     inbound = [item for item in venue.messages if item.direction == "inbound"]
     latest_reply = max(inbound, key=lambda item: item.occurred_at, default=None)
+    activity_times = [
+        *[item.sent_at for item in venue.outreach],
+        *[item.occurred_at for item in venue.messages],
+    ]
+    latest_activity = max(activity_times, default=None)
     gmail_thread_id = (
         latest_reply.gmail_thread_id
         if latest_reply
-        else first_outreach.gmail_thread_id if first_outreach else None
+        else latest_outreach.gmail_thread_id if latest_outreach else None
     )
     return {
         "id": venue.id,
@@ -202,6 +210,8 @@ def venue_payload(venue: Venue) -> dict[str, object]:
         "guest_capacity": venue.guest_capacity,
         "notes": venue.notes,
         "status": venue.status,
+        "created_at": iso_utc(venue.created_at) if venue.created_at else None,
+        "last_activity_at": iso_utc(latest_activity) if latest_activity else None,
         "sent_at": iso_utc(first_outreach.sent_at) if first_outreach else None,
         "responded_at": iso_utc(latest_reply.occurred_at) if latest_reply else None,
         "response_summary": venue.response_summary,
