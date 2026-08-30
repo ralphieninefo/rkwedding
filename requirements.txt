@@ -42,6 +42,7 @@ python-dotenv==1.2.3
 pyyaml==6.0.3
 requests==2.34.2
 requests-oauthlib==2.0.0
+ruff==0.16.5
 soupsieve==2.9.2
 sqlalchemy==2.0.52
 starlette==1.6.0

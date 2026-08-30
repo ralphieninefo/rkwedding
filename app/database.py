@@ -1,11 +1,28 @@
 """Database models and small repository helpers for the control center."""
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterator
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, create_engine, inspect, select, text
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    String,
+    Text,
+    create_engine,
+    inspect,
+    select,
+    text,
+)
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+    sessionmaker,
+)
 
 from app.config import get_settings
 

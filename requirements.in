@@ -8,5 +8,6 @@ pydantic-settings
 pypdf
 psycopg[binary]
 pytest
+ruff
 sqlalchemy
 uvicorn[standard]

@@ -1,9 +1,9 @@
 """FastAPI entrypoint for wedding venue events."""
 
-from pathlib import Path
 import base64
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, status
@@ -30,7 +30,6 @@ from app.models import (
     VenueReply,
 )
 from app.scoring import rank_venues
-
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 

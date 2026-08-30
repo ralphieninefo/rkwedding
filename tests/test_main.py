@@ -3,13 +3,12 @@
 import base64
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-import pytest
 
 from app.config import Settings
 from app.main import app
-
 
 client = TestClient(app)
 
@@ -81,9 +80,10 @@ def test_startup_rejects_missing_dashboard_password(monkeypatch) -> None:
     settings = Settings(_env_file=None)
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
-    with pytest.raises(RuntimeError, match="CONTROL_CENTER_PASSWORD"):
-        with TestClient(app):
-            pass
+    with pytest.raises(RuntimeError, match="CONTROL_CENTER_PASSWORD"), TestClient(
+        app
+    ):
+        pass
 
 
 def test_gmail_event_accepts_correct_token(monkeypatch) -> None:

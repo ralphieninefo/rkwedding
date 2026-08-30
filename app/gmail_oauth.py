@@ -12,7 +12,6 @@ from google_auth_oauthlib.flow import Flow
 from app.config import get_settings
 from app.database import SessionLocal, get_system_state, set_system_state
 
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 CLIENT_SECRET_PATH = DATA_DIR / "google_client_secret.json"
 TOKEN_PATH = DATA_DIR / "google_token.json"
@@ -30,7 +29,7 @@ def _client_config() -> dict[str, object] | None:
         return None
     parsed = json.loads(configured_json.get_secret_value())
     if not isinstance(parsed, dict):
-        raise ValueError("GOOGLE_CLIENT_SECRET_JSON must contain a JSON object.")
+        raise TypeError("GOOGLE_CLIENT_SECRET_JSON must contain a JSON object.")
     return parsed
 
 

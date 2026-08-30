@@ -1,0 +1,16 @@
+target-version = "py312"
+
+# Existing lint debt outside the production-blocker files is baselined here so
+# CI protects new work without expanding this narrowly scoped branch.
+[lint.per-file-ignores]
+"app/agent.py" = ["I001"]
+"app/db_workflow.py" = ["FURB162", "I001"]
+"app/discovery.py" = ["FURB167", "I001"]
+"app/response_tracker.py" = ["I001"]
+"app/scoring.py" = ["I001"]
+"app/sheet_response_sync.py" = ["I001"]
+"app/workflow.py" = ["I001"]
+"tests/test_db_workflow.py" = ["DTZ001", "I001"]
+"tests/test_google_integrations.py" = ["I001"]
+"tests/test_response_tracker.py" = ["PLR0402", "RUF100"]
+"tests/test_sheet_response_sync.py" = ["RUF012"]
