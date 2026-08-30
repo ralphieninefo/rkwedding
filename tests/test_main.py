@@ -5,12 +5,19 @@ import json
 
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+import pytest
 
 from app.config import Settings
 from app.main import app
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def allow_local_dashboard(monkeypatch):
+    settings = Settings(_env_file=None, allow_unauthenticated_local=True)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
 
 def test_dashboard_is_served() -> None:
@@ -38,6 +45,7 @@ def test_venue_directory_is_served() -> None:
 
 def test_hosted_dashboard_requires_password(monkeypatch) -> None:
     settings = Settings(
+        _env_file=None,
         control_center_username="raph",
         control_center_password=SecretStr("test-password"),
     )
@@ -48,6 +56,30 @@ def test_hosted_dashboard_requires_password(monkeypatch) -> None:
 
     assert denied.status_code == 401
     assert allowed.status_code == 200
+
+
+def test_dashboard_fails_closed_without_password(monkeypatch) -> None:
+    settings = Settings(_env_file=None)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    response = client.get("/")
+
+    assert response.status_code == 401
+
+
+def test_dashboard_allows_explicit_local_bypass() -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+
+
+def test_startup_rejects_missing_dashboard_password(monkeypatch) -> None:
+    settings = Settings(_env_file=None)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    with pytest.raises(RuntimeError, match="CONTROL_CENTER_PASSWORD"):
+        with TestClient(app):
+            pass
 
 
 def test_gmail_event_returns_placeholder_decision(monkeypatch) -> None:

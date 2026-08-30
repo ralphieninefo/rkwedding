@@ -39,6 +39,15 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 async def lifespan(_app: FastAPI):
     from app.database import init_database
 
+    settings = get_settings()
+    if (
+        not settings.control_center_password
+        and not settings.allow_unauthenticated_local
+    ):
+        raise RuntimeError(
+            "CONTROL_CENTER_PASSWORD is required unless "
+            "ALLOW_UNAUTHENTICATED_LOCAL=true is explicitly set for local use."
+        )
     init_database()
     yield
 
@@ -55,8 +64,16 @@ async def protect_hosted_control_center(request: Request, call_next):
     public_path = request.url.path == "/health" or request.url.path.startswith(
         "/events/"
     )
-    if not password or public_path:
+    if public_path:
         return await call_next(request)
+    if not password:
+        if settings.allow_unauthenticated_local:
+            return await call_next(request)
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Control center login required."},
+            headers={"WWW-Authenticate": 'Basic realm="Wedding Venue Control Center"'},
+        )
 
     authorization = request.headers.get("Authorization", "")
     authenticated = False

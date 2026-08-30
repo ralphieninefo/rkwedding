@@ -39,3 +39,8 @@ services:
         value: raph
         scope: RUN_TIME
         type: GENERAL
+      # Required: fill this encrypted value in the App Platform UI before deploy.
+      - key: CONTROL_CENTER_PASSWORD
+        value: ""
+        scope: RUN_TIME
+        type: SECRET

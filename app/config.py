@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     auto_send: bool = False
     control_center_username: str = "raph"
     control_center_password: SecretStr | None = None
+    allow_unauthenticated_local: bool = False
     app_env: str = "local"
     database_url: str = "sqlite:///data/wedding.db"
 
