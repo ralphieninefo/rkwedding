@@ -31,6 +31,7 @@ const outreachDialogMessage = document.querySelector("#outreachDialogMessage");
 let allVenues = [];
 let pendingOutreachVenue = null;
 let pendingOutreachButton = null;
+let pendingOutreachButtonText = "";
 
 const formatDate = (value) => value
   ? new Date(value).toLocaleString([], {dateStyle: "medium", timeStyle: "short"})
@@ -81,6 +82,32 @@ const filteredVenues = () => {
 
 const applyFilters = () => renderVenues(filteredVenues());
 
+const openOutreachPreview = async (venue, button) => {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Loading draft…";
+  try {
+    const response = await fetch(`/api/venues/${venue.id}/outreach-preview`);
+    const preview = await response.json();
+    if (!response.ok) throw new Error(preview.detail || "Could not load inquiry.");
+    pendingOutreachVenue = venue;
+    pendingOutreachButton = button;
+    pendingOutreachButtonText = originalText;
+    outreachRecipient.value = preview.recipient;
+    outreachSubject.value = preview.subject;
+    outreachBody.value = preview.body;
+    outreachDialogMessage.textContent = "";
+    outreachDialog.showModal();
+  } catch (error) {
+    trackerMessage.hidden = false;
+    trackerMessage.textContent = error instanceof Error
+      ? error.message : "Could not load inquiry.";
+    button.disabled = false;
+    button.textContent = originalText;
+    throw error;
+  }
+};
+
 const renderVenues = (venues) => {
   responseRows.replaceChildren();
   venues.forEach((venue) => {
@@ -125,27 +152,8 @@ const renderVenues = (venues) => {
       send.className = "button button-secondary reply-button";
       send.type = "button";
       send.textContent = "Send inquiry";
-      send.addEventListener("click", async () => {
-        send.disabled = true;
-        send.textContent = "Loading…";
-        try {
-          const response = await fetch(`/api/venues/${venue.id}/outreach-preview`);
-          const preview = await response.json();
-          if (!response.ok) throw new Error(preview.detail || "Could not load inquiry.");
-          pendingOutreachVenue = venue;
-          pendingOutreachButton = send;
-          outreachRecipient.value = preview.recipient;
-          outreachSubject.value = preview.subject;
-          outreachBody.value = preview.body;
-          outreachDialogMessage.textContent = "";
-          outreachDialog.showModal();
-        } catch (error) {
-          trackerMessage.hidden = false;
-          trackerMessage.textContent = error instanceof Error
-            ? error.message : "Could not load inquiry.";
-          send.disabled = false;
-          send.textContent = "Send inquiry";
-        }
+      send.addEventListener("click", () => {
+        openOutreachPreview(venue, send).catch(() => {});
       });
       actions.append(send);
     } else if (venue.gmail_url) {
@@ -179,10 +187,11 @@ cancelOutreach.addEventListener("click", closePreview);
 outreachDialog.addEventListener("close", () => {
   if (pendingOutreachButton) {
     pendingOutreachButton.disabled = false;
-    pendingOutreachButton.textContent = "Send inquiry";
+    pendingOutreachButton.textContent = pendingOutreachButtonText;
   }
   pendingOutreachVenue = null;
   pendingOutreachButton = null;
+  pendingOutreachButtonText = "";
   confirmOutreach.disabled = false;
   confirmOutreach.textContent = "Send inquiry";
   outreachDialogMessage.textContent = "";
@@ -246,7 +255,7 @@ discoverForm.addEventListener("submit", async (event) => {
     ["name", "location", "email", "website", "phone"].forEach((field) => {
       venueForm.elements[field].value = result[field] || "";
     });
-    discoverMessage.textContent = "Contact found. Review it, then choose Save venue or Save & send inquiry.";
+    discoverMessage.textContent = "Contact found. Save it, or review the exact email before sending.";
   } catch (error) {
     discoverMessage.textContent = error instanceof Error ? error.message : "Could not inspect that website.";
   } finally {
@@ -261,9 +270,12 @@ addVenueButton.addEventListener("click", () => {
 
 venueForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const button = event.submitter;
+  const reviewAndSend = button?.value === "send";
   const payload = Object.fromEntries(new FormData(venueForm).entries());
-  payload.send_now = event.submitter?.value === "send";
-  venueFormMessage.textContent = payload.send_now ? "Saving and sending…" : "Saving…";
+  payload.send_now = false;
+  button.disabled = true;
+  venueFormMessage.textContent = reviewAndSend ? "Saving venue and preparing draft…" : "Saving…";
   try {
     const response = await fetch("/api/venues", {
       method: "POST",
@@ -272,15 +284,25 @@ venueForm.addEventListener("submit", async (event) => {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "Could not save venue.");
-    venueFormMessage.textContent = result.sent
-      ? "Inquiry sent and tracked."
-      : "Venue saved as a draft.";
+    const savedVenue = {
+      id: result.id,
+      name: payload.name,
+      email: payload.email,
+    };
     venueForm.reset();
     await loadVenues();
+    if (reviewAndSend) {
+      venueFormMessage.textContent = "Venue saved. Review the draft before sending.";
+      await openOutreachPreview(savedVenue, button);
+    } else {
+      venueFormMessage.textContent = "Venue saved as a draft and added to the dashboard.";
+      button.disabled = false;
+    }
   } catch (error) {
     venueFormMessage.textContent = error instanceof Error
       ? error.message
       : "Could not save venue.";
+    button.disabled = false;
   }
 });
 
