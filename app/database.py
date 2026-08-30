@@ -270,6 +270,11 @@ def set_system_state(session: Session, key: str, value: str) -> None:
     session.commit()
 
 
+def get_system_state(session: Session, key: str) -> str | None:
+    state = session.get(SystemState, key)
+    return state.value if state else None
+
+
 def sort_venue_payloads(
     venues: list[dict[str, object]],
 ) -> list[dict[str, object]]:

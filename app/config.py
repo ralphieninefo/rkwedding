@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     google_access_token: SecretStr | None = None
     google_client_id: str | None = None
     google_client_secret: SecretStr | None = None
+    google_client_secret_json: SecretStr | None = None
     google_refresh_token: SecretStr | None = None
     google_spreadsheet_id: str | None = None
     google_gmail_user_id: str = "me"
