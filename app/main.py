@@ -60,8 +60,8 @@ async def protect_hosted_control_center(request: Request, call_next):
     """Require HTTP Basic auth when a hosted dashboard password is configured."""
     settings = get_settings()
     password = settings.control_center_password
-    public_path = request.url.path == "/health" or request.url.path.startswith(
-        "/events/"
+    public_path = request.url.path in {"/about", "/privacy", "/health"} or (
+        request.url.path.startswith("/events/")
     )
     if public_path:
         return await call_next(request)
@@ -100,6 +100,18 @@ async def protect_hosted_control_center(request: Request, call_next):
 async def dashboard() -> FileResponse:
     """Serve the focused Gmail response tracker."""
     return FileResponse(STATIC_DIR / "inbox.html")
+
+
+@app.get("/about", include_in_schema=False)
+async def about() -> FileResponse:
+    """Serve the public application information required for Google OAuth."""
+    return FileResponse(STATIC_DIR / "about.html")
+
+
+@app.get("/privacy", include_in_schema=False)
+async def privacy() -> FileResponse:
+    """Serve the public privacy policy required for Google OAuth."""
+    return FileResponse(STATIC_DIR / "privacy.html")
 
 
 @app.get("/analysis", include_in_schema=False)

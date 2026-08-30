@@ -31,6 +31,29 @@ def test_dashboard_is_served() -> None:
     assert "Private venue workspace" in response.text
 
 
+@pytest.mark.parametrize(
+    ("path", "expected_text"),
+    [
+        ("/about", "One place to manage our wedding venue search."),
+        ("/privacy", "Google API Services User Data Policy"),
+    ],
+)
+def test_public_oauth_information_pages_are_served_without_login(
+    monkeypatch, path: str, expected_text: str
+) -> None:
+    settings = Settings(
+        _env_file=None,
+        control_center_username="raph",
+        control_center_password=SecretStr("test-password"),
+    )
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert expected_text in response.text
+
+
 def test_old_analysis_dashboard_is_parked() -> None:
     response = client.get("/analysis")
 
