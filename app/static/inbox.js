@@ -110,7 +110,38 @@ const renderVenues = (venues) => {
     status.append(pill);
 
     const actions = document.createElement("td");
-    if (venue.gmail_url) {
+    if (venue.status.toLocaleLowerCase() === "draft" && venue.email) {
+      const send = document.createElement("button");
+      send.className = "button button-secondary reply-button";
+      send.type = "button";
+      send.textContent = "Send inquiry";
+      send.addEventListener("click", async () => {
+        const confirmed = window.confirm(
+          `Send the standard Italian wedding inquiry to ${venue.name} (${venue.email})?`,
+        );
+        if (!confirmed) return;
+        send.disabled = true;
+        send.textContent = "Sending…";
+        try {
+          const response = await fetch(`/api/venues/${venue.id}/send`, {method: "POST"});
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.detail || "Could not send inquiry.");
+          trackerMessage.hidden = false;
+          trackerMessage.textContent = result.sent
+            ? `Inquiry sent to ${venue.name}.`
+            : `No duplicate sent. Gmail already has a conversation with ${venue.name}.`;
+          await loadVenues();
+        } catch (error) {
+          trackerMessage.hidden = false;
+          trackerMessage.textContent = error instanceof Error
+            ? error.message
+            : "Could not send inquiry.";
+          send.disabled = false;
+          send.textContent = "Send inquiry";
+        }
+      });
+      actions.append(send);
+    } else if (venue.gmail_url) {
       const reply = document.createElement("a");
       reply.className = "button button-secondary reply-button";
       reply.href = venue.gmail_url;

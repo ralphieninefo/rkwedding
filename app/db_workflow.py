@@ -144,6 +144,21 @@ async def create_venue_and_optionally_send(
     if not send_now:
         return {"id": venue_id, "status": "Draft", "sent": False}
 
+    return await send_venue_inquiry(settings, venue_id)
+
+
+async def send_venue_inquiry(
+    settings: Settings, venue_id: int
+) -> dict[str, object]:
+    """Send the standard first inquiry for one saved draft venue."""
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        if venue.outreach:
+            return {"id": venue_id, "status": venue.status, "sent": False}
+        email = venue.email
+
     token = await get_google_access_token(settings)
     gmail = GmailClient(token, settings.google_gmail_user_id)
     existing = await gmail.search_message_ids(

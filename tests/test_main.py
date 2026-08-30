@@ -69,6 +69,18 @@ def test_venue_directory_is_served() -> None:
     assert "Search venues" in response.text
 
 
+def test_saved_draft_can_be_sent(monkeypatch) -> None:
+    async def fake_send(_settings, venue_id):
+        return {"id": venue_id, "status": "Sent", "sent": True}
+
+    monkeypatch.setattr("app.db_workflow.send_venue_inquiry", fake_send)
+
+    response = client.post("/api/venues/13/send")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": 13, "status": "Sent", "sent": True}
+
+
 def test_hosted_dashboard_requires_password(monkeypatch) -> None:
     settings = Settings(
         _env_file=None,

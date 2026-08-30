@@ -227,6 +227,21 @@ async def create_venue(venue: VenueCreate) -> dict[str, object]:
         raise HTTPException(status_code=502, detail="Gmail could not send the inquiry.") from exc
 
 
+@app.post("/api/venues/{venue_id}/send")
+async def send_venue(venue_id: int) -> dict[str, object]:
+    """Send the standard inquiry for an explicitly selected saved draft."""
+    from app.db_workflow import send_venue_inquiry
+
+    try:
+        return await send_venue_inquiry(get_settings(), venue_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=401, detail="Connect Google before sending.") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Gmail could not send the inquiry.") from exc
+
+
 @app.post("/api/import/sheet")
 async def import_existing_sheet() -> dict[str, int]:
     """Copy valid venue contacts into the database; never modify the Sheet."""
