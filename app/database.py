@@ -112,6 +112,11 @@ def _database_url() -> str:
 
 def _engine():
     url = _database_url()
+    if url.startswith("sqlite") and get_settings().app_env.casefold() != "local":
+        raise RuntimeError(
+            "Production requires a PostgreSQL DATABASE_URL; refusing to use "
+            "ephemeral SQLite storage when APP_ENV is not local."
+        )
     if url.startswith("sqlite:///"):
         path = Path(url.removeprefix("sqlite:///"))
         path.parent.mkdir(parents=True, exist_ok=True)

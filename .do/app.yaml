@@ -1,5 +1,9 @@
 name: rkwedding
 region: nyc
+databases:
+  - engine: PG
+    name: wedding-db
+    production: true
 services:
   - name: web
     git:
@@ -15,6 +19,14 @@ services:
     health_check:
       http_path: /health
     envs:
+      - key: APP_ENV
+        value: production
+        scope: RUN_TIME
+        type: GENERAL
+      - key: DATABASE_URL
+        value: ${wedding-db.DATABASE_URL}
+        scope: RUN_TIME
+        type: SECRET
       - key: GOOGLE_SPREADSHEET_ID
         value: 1CTQ7ochPaQS3ZMREeWDZDyiRcBw_hqyUN_eyrwbHxS0
         scope: RUN_TIME
