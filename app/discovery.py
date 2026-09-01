@@ -2,6 +2,7 @@
 
 import asyncio
 import ipaddress
+import json
 import re
 import socket
 from urllib.parse import urljoin, urlparse
@@ -65,6 +66,44 @@ def _emails(soup: BeautifulSoup, text: str) -> list[str]:
     return sorted(candidates, key=lambda email: (not email.startswith(priorities), email))
 
 
+def _address_objects(value: object):
+    """Yield JSON-LD PostalAddress objects from arbitrarily nested data."""
+    if isinstance(value, dict):
+        if value.get("@type") == "PostalAddress":
+            yield value
+        for child in value.values():
+            yield from _address_objects(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _address_objects(child)
+
+
+def _structured_address(soup: BeautifulSoup) -> tuple[str, str]:
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            data = json.loads(script.string or script.get_text())
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for address in _address_objects(data):
+            locality = str(address.get("addressLocality", "")).strip()
+            region = str(address.get("addressRegion", "")).strip() or locality
+            parts = [
+                address.get("streetAddress"),
+                address.get("postalCode"),
+                locality,
+                address.get("addressRegion"),
+                address.get("addressCountry"),
+            ]
+            location = ", ".join(str(part).strip() for part in parts if part)
+            if region or location:
+                return region[:250], location[:250]
+    locality = soup.select_one('[itemprop="addressLocality"]')
+    region = soup.select_one('[itemprop="addressRegion"]')
+    locality_text = locality.get_text(" ", strip=True) if locality else ""
+    region_text = region.get_text(" ", strip=True) if region else locality_text
+    return region_text[:250], ""
+
+
 def _details(url: str, html: str) -> VenueDiscovery:
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(" ", strip=True)
@@ -78,10 +117,15 @@ def _details(url: str, html: str) -> VenueDiscovery:
     if not phone:
         match = PHONE_RE.search(text)
         phone = match.group(0).strip() if match else ""
+    region, structured_location = _structured_address(soup)
     address = soup.find("address")
+    location = structured_location or (
+        address.get_text(" ", strip=True)[:250] if address else ""
+    )
     return VenueDiscovery(
         name=title,
-        location=address.get_text(" ", strip=True)[:250] if address else "",
+        region=region or location,
+        location=location,
         email=emails[0] if emails else "",
         website=url,
         phone=phone[:100],
@@ -111,6 +155,7 @@ async def discover_venue(value: str) -> VenueDiscovery:
             if contact.email:
                 return VenueDiscovery(
                     name=result.name or contact.name,
+                    region=result.region or contact.region,
                     location=result.location or contact.location,
                     email=contact.email,
                     website=url,

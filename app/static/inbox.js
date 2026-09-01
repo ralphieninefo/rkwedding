@@ -327,7 +327,7 @@ discoverForm.addEventListener("submit", async (event) => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "Could not inspect that website.");
     venueForm.reset();
-    ["name", "location", "email", "website", "phone"].forEach((field) => {
+    ["name", "region", "location", "email", "website", "phone"].forEach((field) => {
       venueForm.elements[field].value = result[field] || "";
     });
     discoverMessage.textContent = "Contact found. Save it, or review the exact email before sending.";

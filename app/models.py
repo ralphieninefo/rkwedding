@@ -222,6 +222,7 @@ class VenueDiscovery(BaseModel):
     """Contact details discovered from a public venue website."""
 
     name: str = ""
+    region: str = ""
     location: str = ""
     email: str = ""
     website: str
