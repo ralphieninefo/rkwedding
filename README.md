@@ -118,6 +118,7 @@ Keep local credentials in `.env`. Never commit `.env`, OAuth client JSON, refres
 | `GOOGLE_SPREADSHEET_ID` | General | Wedding venue master spreadsheet. |
 | `GOOGLE_VENUES_SHEET` | General | Venue tab name; defaults to `Venues`. |
 | `GOOGLE_ALLOWED_EMAILS` | General | Comma-separated Gmail accounts permitted to connect to this private app. |
+| `GOOGLE_PRIMARY_EMAIL` | General | Connected Gmail account used for all new venue inquiries. |
 | `CONTROL_CENTER_PASSWORD` | Secret | Protects the hosted dashboard. |
 | `CONTROL_CENTER_SESSION_TTL_HOURS` | General | Signed login lifetime; defaults to seven days. |
 
@@ -161,7 +162,7 @@ tests/               API, workflow, integration, and scoring tests
 - [ ] Add encrypted Google OAuth runtime secrets.
 - [ ] Add the encrypted model access key and model ID.
 - [ ] Verify one hosted Gmail reconciliation with a controlled venue thread.
-- [x] Schedule reconciliation so replies appear automatically.
+- [x] Reconcile Gmail automatically every five minutes; the dashboard reads PostgreSQL without a manual check.
 - [ ] Add text-only PDF extraction for quote attachments.
 - [ ] Add venue ranking and visit scheduling after quote data is reliable.
 

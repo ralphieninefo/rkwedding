@@ -2,7 +2,6 @@ const gmailBadge = document.querySelector("#gmailBadge");
 const logoutButton = document.querySelector("#logoutButton");
 const gmailStatus = document.querySelector("#gmailStatus");
 const connectButton = document.querySelector("#connectButton");
-const syncButton = document.querySelector("#syncButton");
 const addVenueButton = document.querySelector("#addVenueButton");
 const venueFormPanel = document.querySelector("#venueFormPanel");
 const venueForm = document.querySelector("#venueForm");
@@ -64,7 +63,7 @@ const renderPriceOverview = (overview) => {
 
 const renderLastRefresh = (value) => {
   lastCheck.textContent = value ? formatDate(value) : "Not yet";
-  lastCheckDetail.textContent = value ? "Last successful Gmail check" : "Use Check Gmail to refresh";
+  lastCheckDetail.textContent = value ? "Last successful automatic Gmail update" : "Updates automatically every five minutes";
 };
 
 const timestamp = (value) => value ? new Date(value).getTime() : 0;
@@ -381,25 +380,6 @@ venueForm.addEventListener("submit", async (event) => {
   }
 });
 
-syncButton.addEventListener("click", async () => {
-  syncButton.disabled = true;
-  syncButton.firstChild.textContent = "Checking… ";
-  try {
-    const response = await fetch("/api/control-center/sync", {method: "POST"});
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || "Gmail check failed.");
-    const count = await loadVenues();
-    lastCheck.textContent = formatDate(result.last_refreshed_at);
-    lastCheckDetail.textContent = `${result.sent_confirmed} sent · ${result.replies_synthesized} new replies · ${count} venues`;
-  } catch (error) {
-    trackerMessage.hidden = false;
-    trackerMessage.textContent = error instanceof Error ? error.message : "Gmail check failed.";
-  } finally {
-    syncButton.disabled = false;
-    syncButton.firstChild.textContent = "Check Gmail ";
-  }
-});
-
 const checkStatus = async () => {
   const response = await fetch("/api/gmail/status");
   const status = await response.json();
@@ -410,7 +390,6 @@ const checkStatus = async () => {
     gmailBadge.title = (status.accounts || []).map((account) => account.email).join("\n");
     gmailBadge.classList.remove("badge-muted", "badge-offline");
     connectButton.hidden = false;
-    syncButton.disabled = false;
   } else if (status.oauth_setup_ready) {
     gmailStatus.textContent = "Google not connected";
     connectButton.hidden = false;

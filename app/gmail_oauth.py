@@ -137,6 +137,14 @@ def list_google_accounts() -> list[dict[str, object]]:
 
 def default_google_account_id() -> int | None:
     """Return the account used for new outreach."""
+    preferred_email = get_settings().google_primary_email.strip().casefold()
+    if preferred_email:
+        with SessionLocal() as session:
+            preferred_id = session.scalar(
+                select(GoogleAccount.id).where(GoogleAccount.email == preferred_email)
+            )
+            if preferred_id is not None:
+                return preferred_id
     stored = _stored_token()
     return stored[1] if stored else None
 

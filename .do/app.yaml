@@ -55,14 +55,26 @@ services:
         type: GENERAL
       # Add the shared wedding inbox here before connecting it in the app.
       - key: GOOGLE_ALLOWED_EMAILS
-        value: raphaelsirvent1994@gmail.com
+        value: raphaelsirvent1994@gmail.com,raphaelkassia2027@gmail.com
+        scope: RUN_TIME
+        type: GENERAL
+      - key: GOOGLE_PRIMARY_EMAIL
+        value: raphaelkassia2027@gmail.com
+        scope: RUN_TIME
+        type: GENERAL
+      - key: DIGITALOCEAN_MODEL_ACCESS_KEY
+        value: ""
+        scope: RUN_TIME
+        type: SECRET
+      - key: DIGITALOCEAN_MODEL_ID
+        value: ""
         scope: RUN_TIME
         type: GENERAL
 jobs:
   - name: gmail-sync
     kind: SCHEDULED
     schedule:
-      cron: "*/15 * * * *"
+      cron: "*/5 * * * *"
       time_zone: America/Los_Angeles
     git:
       repo_clone_url: https://github.com/ralphieninefo/rkwedding.git
@@ -79,3 +91,11 @@ jobs:
         value: ${rkwedding.DATABASE_URL}
         scope: RUN_TIME
         type: SECRET
+      - key: DIGITALOCEAN_MODEL_ACCESS_KEY
+        value: ""
+        scope: RUN_TIME
+        type: SECRET
+      - key: DIGITALOCEAN_MODEL_ID
+        value: ""
+        scope: RUN_TIME
+        type: GENERAL

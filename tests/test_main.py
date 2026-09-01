@@ -29,6 +29,9 @@ def test_dashboard_is_served() -> None:
     assert response.status_code == 200
     assert "Wedding Venue Control Center" in response.text
     assert "Private venue workspace" in response.text
+    assert "Check Gmail" not in response.text
+    assert "Workflow" not in response.text
+    assert "Last automatic update" in response.text
 
 
 @pytest.mark.parametrize(

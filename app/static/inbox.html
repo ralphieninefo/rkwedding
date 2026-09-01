@@ -38,7 +38,6 @@
         <div class="inbox-actions">
           <a class="button button-secondary connect-button" id="connectButton" href="/auth/google/start">Add Gmail account</a>
           <button class="button button-secondary" id="addVenueButton" type="button">Add venue</button>
-          <button class="button button-primary" id="syncButton" type="button" disabled>Check Gmail <span aria-hidden="true">↻</span></button>
         </div>
       </section>
 
@@ -74,9 +73,8 @@
 
       <section class="summary-grid" aria-label="Response summary">
         <article class="brief-card"><span class="brief-label">Venues</span><strong id="trackedCount">0</strong><span>saved in the app</span></article>
-        <article class="brief-card"><span class="brief-label">Last refresh</span><strong class="summary-text" id="lastCheck">Not yet</strong><span id="lastCheckDetail">Connect Google to begin</span></article>
+        <article class="brief-card"><span class="brief-label">Last automatic update</span><strong class="summary-text" id="lastCheck">Not yet</strong><span id="lastCheckDetail">Gmail updates every five minutes</span></article>
         <article class="brief-card"><span class="brief-label">Estimated price</span><strong class="summary-text" id="priceEstimate">Not enough data</strong><span id="priceEstimateDetail">Based on 90 guests</span></article>
-        <article class="brief-card brief-card-accent"><span class="brief-label">Workflow</span><strong class="summary-text">App → Gmail</strong><span>English summaries by Kimi</span></article>
       </section>
 
       <section class="panel response-panel" aria-labelledby="responsesTitle">
@@ -146,6 +144,6 @@
       <span>Control center · Private app database</span>
       <a href="/venues">Full venue directory ↗</a>
     </footer>
-    <script src="/static/inbox.js?v=20260901-2" defer></script>
+    <script src="/static/inbox.js?v=20260901-3" defer></script>
   </body>
 </html>

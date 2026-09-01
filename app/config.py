@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     google_quotes_sheet: str = "Quotes"
     google_system_sheet: str = "System"
     google_allowed_emails: str = ""
+    google_primary_email: str = ""
     auto_send: bool = False
     control_center_username: str = "raph"
     control_center_password: SecretStr | None = None
