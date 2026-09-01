@@ -117,14 +117,17 @@ Keep local credentials in `.env`. Never commit `.env`, OAuth client JSON, refres
 | `GOOGLE_REFRESH_TOKEN` | Secret | Server-side Gmail and Sheets access. |
 | `GOOGLE_SPREADSHEET_ID` | General | Wedding venue master spreadsheet. |
 | `GOOGLE_VENUES_SHEET` | General | Venue tab name; defaults to `Venues`. |
+| `GOOGLE_ALLOWED_EMAILS` | General | Comma-separated Gmail accounts permitted to connect to this private app. |
 | `CONTROL_CENTER_PASSWORD` | Secret | Protects the hosted dashboard. |
+| `CONTROL_CENTER_SESSION_TTL_HOURS` | General | Signed login lifetime; defaults to seven days. |
 
 `DIGITALOCEAN_API_TOKEN` is only for `doctl` or infrastructure tooling. The running application does not use it for inference.
 
-Google's refreshable OAuth credential is stored in the database under
-`google_oauth_token`, so Gmail stays connected across container restarts. If an
-older `data/google_token.json` is present while the database is empty, it is
-imported once; the database is authoritative after that.
+Google's refreshable OAuth credentials are stored in PostgreSQL, so Gmail stays
+connected across container restarts. Existing accounts may reconnect; a new
+account is accepted only when its address appears in `GOOGLE_ALLOWED_EMAILS`.
+If an older `data/google_token.json` is present while the database is empty, it
+is imported once; the database is authoritative after that.
 
 The application refuses to start with SQLite whenever `APP_ENV` is not `local`.
 Production therefore requires the managed PostgreSQL binding configured in
@@ -151,13 +154,14 @@ tests/               API, workflow, integration, and scoring tests
 ## Production checklist
 
 - [x] Deploy the FastAPI service from GitHub `main`.
-- [x] Protect the hosted control center with HTTP Basic authentication.
+- [x] Protect the hosted control center with a signed, HttpOnly login session.
+- [x] Restrict new Gmail connections with a server-side email allowlist.
 - [x] Define managed PostgreSQL and its `DATABASE_URL` binding in the app spec.
 - [ ] Fill the encrypted `CONTROL_CENTER_PASSWORD` placeholder in App Platform.
 - [ ] Add encrypted Google OAuth runtime secrets.
 - [ ] Add the encrypted model access key and model ID.
 - [ ] Verify one hosted Gmail reconciliation with a controlled venue thread.
-- [ ] Schedule reconciliation so replies appear automatically.
+- [x] Schedule reconciliation so replies appear automatically.
 - [ ] Add text-only PDF extraction for quote attachments.
 - [ ] Add venue ranking and visit scheduling after quote data is reliable.
 
@@ -167,4 +171,6 @@ tests/               API, workflow, integration, and scoring tests
 - Full email bodies stay in the database and are excluded from venue API responses.
 - The dashboard opens Gmail for human-written replies instead of autonomously negotiating.
 - Credentials remain outside Git and must be encrypted in App Platform.
+- A dashboard login does not authorize an arbitrary Gmail account; Google OAuth
+  callbacks are checked against the backend allowlist before tokens are stored.
 - Reconciliation is idempotent: the same Gmail message is not processed twice.

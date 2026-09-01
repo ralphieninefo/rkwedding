@@ -1,9 +1,9 @@
 """FastAPI entrypoint for wedding venue events."""
 
-import base64
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, status
@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.inference import InvalidInferenceResponseError
 from app.models import (
     AgentDecision,
+    ControlCenterLogin,
     GmailEvent,
     GmailPushReceipt,
     PubSubEnvelope,
@@ -31,6 +32,11 @@ from app.models import (
     VenueResearchUpdate,
 )
 from app.scoring import rank_venues
+from app.session_auth import (
+    SESSION_COOKIE,
+    create_session_cookie,
+    valid_session_cookie,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -58,43 +64,88 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.middleware("http")
 async def protect_hosted_control_center(request: Request, call_next):
-    """Require HTTP Basic auth when a hosted dashboard password is configured."""
+    """Require a signed login session for the private control center."""
     settings = get_settings()
     password = settings.control_center_password
-    public_path = request.url.path in {"/about", "/privacy", "/health"} or (
-        request.url.path.startswith("/events/")
+    public_path = request.url.path in {
+        "/login",
+        "/api/login",
+        "/about",
+        "/privacy",
+        "/health",
+    } or (
+        request.url.path.startswith(("/events/", "/static/"))
     )
     if public_path:
         return await call_next(request)
     if not password:
         if settings.allow_unauthenticated_local:
             return await call_next(request)
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "Control center login required."},
-            headers={"WWW-Authenticate": 'Basic realm="Wedding Venue Control Center"'},
-        )
+        return JSONResponse(status_code=401, content={"detail": "Login required."})
 
-    authorization = request.headers.get("Authorization", "")
-    authenticated = False
-    if authorization.startswith("Basic "):
-        try:
-            decoded = base64.b64decode(authorization[6:]).decode("utf-8")
-            username, supplied_password = decoded.split(":", 1)
-            authenticated = secrets.compare_digest(
-                username, settings.control_center_username
-            ) and secrets.compare_digest(
-                supplied_password, password.get_secret_value()
-            )
-        except (ValueError, UnicodeDecodeError):
-            authenticated = False
+    authenticated = valid_session_cookie(
+        request.cookies.get(SESSION_COOKIE),
+        settings.control_center_username,
+        password,
+    )
+    if not authenticated and request.method == "GET" and not request.url.path.startswith(
+        ("/api/", "/auth/")
+    ):
+        destination = request.url.path
+        if request.url.query:
+            destination = f"{destination}?{request.url.query}"
+        return RedirectResponse(f"/login?next={quote(destination, safe='')}", status_code=303)
     if not authenticated:
         return JSONResponse(
             status_code=401,
-            content={"detail": "Control center login required."},
-            headers={"WWW-Authenticate": 'Basic realm="Wedding Venue Control Center"'},
+            content={"detail": "Your control center session has expired. Sign in again."},
         )
     return await call_next(request)
+
+
+@app.get("/login", include_in_schema=False)
+async def login_page() -> FileResponse:
+    """Serve a reliable application-owned login form."""
+    return FileResponse(STATIC_DIR / "login.html")
+
+
+@app.post("/api/login")
+async def login(
+    request: Request, credentials: ControlCenterLogin
+) -> JSONResponse:
+    """Exchange the shared dashboard credential for a signed session cookie."""
+    settings = get_settings()
+    password = settings.control_center_password
+    if not password:
+        raise HTTPException(status_code=503, detail="Dashboard login is not configured.")
+    authenticated = secrets.compare_digest(
+        credentials.username, settings.control_center_username
+    ) and secrets.compare_digest(
+        credentials.password, password.get_secret_value()
+    )
+    if not authenticated:
+        raise HTTPException(status_code=401, detail="Incorrect username or password.")
+    response = JSONResponse({"authenticated": True})
+    response.set_cookie(
+        SESSION_COOKIE,
+        create_session_cookie(
+            settings.control_center_username,
+            password,
+            ttl_hours=settings.control_center_session_ttl_hours,
+        ),
+        httponly=True,
+        secure=request.url.scheme == "https" or settings.app_env != "local",
+        samesite="lax",
+        max_age=settings.control_center_session_ttl_hours * 60 * 60,
+    )
+    return response
+
+
+@app.post("/api/logout")
+async def logout() -> JSONResponse:
+    response = JSONResponse({"authenticated": False})
+    response.delete_cookie(SESSION_COOKIE)
+    return response
 
 
 @app.get("/", include_in_schema=False)
@@ -189,13 +240,16 @@ async def finish_google_auth(
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state.")
     if not code_verifier:
         raise HTTPException(status_code=400, detail="OAuth verifier is missing.")
-    account = await run_in_threadpool(
-        finish_authorization,
-        redirect_uri,
-        str(request.url),
-        state,
-        code_verifier,
-    )
+    try:
+        account = await run_in_threadpool(
+            finish_authorization,
+            redirect_uri,
+            str(request.url),
+            state,
+            code_verifier,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     response = RedirectResponse(f"/?connected=1&account={account['id']}")
     response.delete_cookie("google_oauth_state")
     response.delete_cookie("google_oauth_code_verifier")

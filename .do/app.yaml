@@ -49,6 +49,15 @@ services:
         value: ""
         scope: RUN_TIME
         type: SECRET
+      - key: CONTROL_CENTER_SESSION_TTL_HOURS
+        value: "168"
+        scope: RUN_TIME
+        type: GENERAL
+      # Add the shared wedding inbox here before connecting it in the app.
+      - key: GOOGLE_ALLOWED_EMAILS
+        value: raphaelsirvent1994@gmail.com
+        scope: RUN_TIME
+        type: GENERAL
 jobs:
   - name: gmail-sync
     kind: SCHEDULED

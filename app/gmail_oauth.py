@@ -179,6 +179,11 @@ def gmail_connected() -> bool:
     return _stored_token() is not None
 
 
+def account_is_approved(email: str, *, already_connected: bool) -> bool:
+    """Allow known accounts to reconnect and new accounts only by allowlist."""
+    return already_connected or email.casefold() in get_settings().google_allowed_email_set
+
+
 def authorization_url(redirect_uri: str) -> tuple[str, str, str]:
     """Create a Google consent URL and its one-time PKCE browser values."""
     if not oauth_setup_ready():
@@ -218,6 +223,10 @@ def finish_authorization(
         account = session.scalar(
             select(GoogleAccount).where(GoogleAccount.email == email)
         )
+        if not account_is_approved(email, already_connected=account is not None):
+            raise PermissionError(
+                "This Gmail account is not approved for the private control center."
+            )
         if account is None:
             is_primary = session.scalar(
                 select(GoogleAccount.id).limit(1)

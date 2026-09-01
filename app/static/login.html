@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Sign in to the private wedding venue control center.">
+    <title>Sign in · Wedding Venue Control Center</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/login.css">
+  </head>
+  <body>
+    <div class="login-ambient" aria-hidden="true"></div>
+    <main class="login-shell">
+      <section class="login-card" aria-labelledby="loginTitle">
+        <span class="brand-mark" aria-hidden="true">KR</span>
+        <p class="eyebrow">Private venue workspace</p>
+        <h1 id="loginTitle">Welcome back.</h1>
+        <p class="login-description">Sign in to manage venue outreach, Gmail responses, quotes, and research.</p>
+        <form id="loginForm" class="login-form">
+          <label><span>Username</span><input name="username" autocomplete="username" required autofocus></label>
+          <label><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+          <p class="login-message" id="loginMessage" role="status"></p>
+          <button class="button button-primary" type="submit">Sign in</button>
+        </form>
+        <small>Only Kassia and Raphaël should have access.</small>
+      </section>
+    </main>
+    <script src="/static/login.js?v=20260901-1" defer></script>
+  </body>
+</html>

@@ -1,4 +1,5 @@
 const gmailBadge = document.querySelector("#gmailBadge");
+const logoutButton = document.querySelector("#logoutButton");
 const gmailStatus = document.querySelector("#gmailStatus");
 const connectButton = document.querySelector("#connectButton");
 const syncButton = document.querySelector("#syncButton");
@@ -428,6 +429,11 @@ const checkStatus = async () => {
 checkStatus().catch(() => {
   gmailStatus.textContent = "Local service unavailable";
   gmailBadge.classList.add("badge-offline");
+});
+
+logoutButton.addEventListener("click", async () => {
+  await fetch("/api/logout", {method: "POST"});
+  window.location.assign("/login");
 });
 
 window.setInterval(() => {

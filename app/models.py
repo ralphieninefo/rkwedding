@@ -205,6 +205,13 @@ class VenueResearchUpdate(BaseModel):
     notes: str = Field(default="", max_length=20_000)
 
 
+class ControlCenterLogin(BaseModel):
+    """Credentials for the private dashboard login page."""
+
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=500)
+
+
 class VenueDiscoveryRequest(BaseModel):
     """Public venue website to inspect for contact details."""
 

@@ -290,6 +290,18 @@
   text-transform: uppercase;
 }
 
+.session-link {
+  border:0;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  font:inherit;
+  font-size:.76rem;
+  font-weight:700;
+}
+
+.session-link:hover { color:var(--green-dark); }
+
 .outreach-dialog {
   width: min(720px, calc(100% - 32px));
   max-height: calc(100vh - 48px);

@@ -150,11 +150,42 @@ def test_hosted_dashboard_requires_password(monkeypatch) -> None:
     )
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
-    denied = client.get("/")
-    allowed = client.get("/", auth=("raph", "test-password"))
+    with TestClient(app) as hosted_client:
+        denied = hosted_client.get("/", follow_redirects=False)
+        login_page = hosted_client.get("/login")
+        incorrect = hosted_client.post(
+            "/api/login",
+            json={"username": "raph", "password": "wrong"},
+        )
+        allowed = hosted_client.post(
+            "/api/login",
+            json={"username": "raph", "password": "test-password"},
+        )
+        dashboard = hosted_client.get("/")
 
-    assert denied.status_code == 401
+    assert denied.status_code == 303
+    assert denied.headers["location"].startswith("/login?next=")
+    assert "www-authenticate" not in denied.headers
+    assert login_page.status_code == 200
+    assert "Welcome back" in login_page.text
+    assert incorrect.status_code == 401
     assert allowed.status_code == 200
+    assert dashboard.status_code == 200
+
+
+def test_hosted_api_returns_plain_401_without_browser_popup(monkeypatch) -> None:
+    settings = Settings(
+        _env_file=None,
+        control_center_username="raph",
+        control_center_password=SecretStr("test-password"),
+    )
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    with TestClient(app) as hosted_client:
+        response = hosted_client.get("/api/gmail/status")
+
+    assert response.status_code == 401
+    assert "www-authenticate" not in response.headers
 
 
 def test_dashboard_fails_closed_without_password(monkeypatch) -> None:

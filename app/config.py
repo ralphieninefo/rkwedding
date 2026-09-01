@@ -25,9 +25,11 @@ class Settings(BaseSettings):
     google_venues_sheet: str = "Venues"
     google_quotes_sheet: str = "Quotes"
     google_system_sheet: str = "System"
+    google_allowed_emails: str = ""
     auto_send: bool = False
     control_center_username: str = "raph"
     control_center_password: SecretStr | None = None
+    control_center_session_ttl_hours: int = 168
     allow_unauthenticated_local: bool = False
     app_env: str = "local"
     database_url: str = "sqlite:///data/wedding.db"
@@ -55,6 +57,15 @@ class Settings(BaseSettings):
             self.google_spreadsheet_id
             and (self.google_access_token or refresh_configured)
         )
+
+    @property
+    def google_allowed_email_set(self) -> set[str]:
+        """Return normalized Gmail accounts explicitly approved by the owner."""
+        return {
+            email.strip().casefold()
+            for email in self.google_allowed_emails.split(",")
+            if email.strip()
+        }
 
 
 @lru_cache

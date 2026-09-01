@@ -2,6 +2,7 @@ const directory = document.querySelector("#venueDirectory");
 const directoryMessage = document.querySelector("#directoryMessage");
 const directoryCount = document.querySelector("#directoryCount");
 const venueSearch = document.querySelector("#venueSearch");
+const logoutButton = document.querySelector("#logoutButton");
 const researchDialog = document.querySelector("#researchDialog");
 const researchForm = document.querySelector("#researchForm");
 const researchMessage = document.querySelector("#researchMessage");
@@ -70,3 +71,5 @@ closeResearchDialog.addEventListener("click",closeResearch); cancelResearch.addE
 researchForm.addEventListener("submit",async(event)=>{ event.preventDefault(); if(!researchVenue)return; const button=event.submitter; button.disabled=true; researchMessage.textContent="Saving…"; try { const payload=Object.fromEntries(new FormData(researchForm).entries()); const response=await fetch(`/api/venues/${researchVenue.id}/research`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}); const result=await response.json(); if(!response.ok)throw new Error(result.detail||"Could not save research."); researchDialog.close(); await loadDirectory(); } catch(error){ researchMessage.textContent=error.message||"Could not save research."; } finally { button.disabled=false; } });
 
 loadDirectory().catch(error => { directoryMessage.textContent=error.message; });
+
+logoutButton.addEventListener("click",async()=>{ await fetch("/api/logout",{method:"POST"}); window.location.assign("/login"); });
