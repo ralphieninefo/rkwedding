@@ -74,7 +74,7 @@ jobs:
   - name: gmail-sync
     kind: SCHEDULED
     schedule:
-      cron: "*/5 * * * *"
+      cron: "*/15 * * * *"
       time_zone: America/Los_Angeles
     git:
       repo_clone_url: https://github.com/ralphieninefo/rkwedding.git

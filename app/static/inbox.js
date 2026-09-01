@@ -63,7 +63,7 @@ const renderPriceOverview = (overview) => {
 
 const renderLastRefresh = (value) => {
   lastCheck.textContent = value ? formatDate(value) : "Not yet";
-  lastCheckDetail.textContent = value ? "Last successful automatic Gmail update" : "Updates automatically every five minutes";
+  lastCheckDetail.textContent = value ? "Last successful automatic Gmail update" : "Updates automatically every 15 minutes";
 };
 
 const timestamp = (value) => value ? new Date(value).getTime() : 0;

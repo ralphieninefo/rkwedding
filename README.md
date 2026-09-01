@@ -162,7 +162,7 @@ tests/               API, workflow, integration, and scoring tests
 - [ ] Add encrypted Google OAuth runtime secrets.
 - [ ] Add the encrypted model access key and model ID.
 - [ ] Verify one hosted Gmail reconciliation with a controlled venue thread.
-- [x] Reconcile Gmail automatically every five minutes; the dashboard reads PostgreSQL without a manual check.
+- [x] Reconcile Gmail automatically every 15 minutes; the dashboard reads PostgreSQL without a manual check.
 - [ ] Add text-only PDF extraction for quote attachments.
 - [ ] Add venue ranking and visit scheduling after quote data is reliable.
 
