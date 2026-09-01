@@ -6,6 +6,7 @@ import secrets
 from pathlib import Path
 
 import httpx
+from google.auth.exceptions import GoogleAuthError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -92,7 +93,7 @@ def _migrate_legacy_account() -> None:
             json.loads(token_json), SCOPES
         )
         email = _profile_email(credentials)
-    except (AttributeError, ValueError, httpx.HTTPError):
+    except (AttributeError, GoogleAuthError, ValueError, httpx.HTTPError):
         # Keep the legacy credential usable if it cannot be identified yet.
         return
     with SessionLocal() as session:
