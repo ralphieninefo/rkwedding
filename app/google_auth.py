@@ -5,19 +5,21 @@ import httpx
 from app.config import Settings
 
 
-async def get_google_access_token(settings: Settings) -> str:
+async def get_google_access_token(
+    settings: Settings, account_id: int | None = None
+) -> str:
     """Use a local access token or exchange a refresh token in production."""
-    if settings.google_access_token:
+    if account_id is None and settings.google_access_token:
         return settings.google_access_token.get_secret_value()
     try:
         from app.gmail_oauth import load_credentials
 
-        credentials = load_credentials()
+        credentials = load_credentials(account_id)
         if credentials.token:
             return credentials.token
     except (FileNotFoundError, ValueError):
         pass
-    if not (
+    if account_id is not None or not (
         settings.google_client_id
         and settings.google_client_secret
         and settings.google_refresh_token

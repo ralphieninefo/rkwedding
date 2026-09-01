@@ -33,7 +33,22 @@
       <section class="venue-directory" id="venueDirectory" hidden></section>
     </main>
 
+    <dialog class="outreach-dialog" id="researchDialog" aria-labelledby="researchDialogTitle">
+      <div class="outreach-dialog-heading">
+        <div><p class="eyebrow">Human research</p><h2 id="researchDialogTitle">Add venue notes</h2></div>
+        <button class="dialog-close" id="closeResearchDialog" type="button" aria-label="Close research">×</button>
+      </div>
+      <form id="researchForm" class="research-form">
+        <label><span>Source type</span><select name="source_type"><option value="Reddit">Reddit</option><option value="Direct contact">Direct contact</option><option value="Referral">Referral</option><option value="Website">Website</option><option value="Other">Other</option></select></label>
+        <label><span>Source link</span><input name="source_url" type="url" placeholder="https://reddit.com/…"></label>
+        <label><span>Contact name</span><input name="contact_name" placeholder="Who shared this?"></label>
+        <label class="research-notes"><span>Notes</span><textarea name="notes" required placeholder="Paste Kasia's findings here…"></textarea></label>
+        <p class="form-message" id="researchMessage" role="status"></p>
+        <div class="outreach-dialog-actions"><button class="button button-secondary" id="cancelResearch" type="button">Cancel</button><button class="button button-primary" type="submit">Save research</button></div>
+      </form>
+    </dialog>
+
     <footer class="site-footer"><span>Control center · Full venue metadata</span><a href="/">Back to tracking ↗</a></footer>
-    <script src="/static/venues.js" defer></script>
+    <script src="/static/venues.js?v=20260831-1" defer></script>
   </body>
 </html>

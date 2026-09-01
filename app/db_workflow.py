@@ -20,11 +20,24 @@ from app.database import (
     upsert_venue,
 )
 from app.gmail import GmailClient, GmailMessage
+from app.gmail_oauth import default_google_account_id, list_google_accounts
 from app.google_auth import get_google_access_token
 from app.inference import DigitalOceanInferenceClient, InvalidInferenceResponseError
 from app.models import ResponseSynthesis
 from app.sheets import GoogleSheetsClient
 from app.workflow import OUTREACH_BODY, OUTREACH_SUBJECT
+
+
+FOLLOWUP_BODY = """Buongiorno,
+
+grazie mille per le informazioni e per il preventivo. Stiamo confrontando le opzioni e avremmo piacere di approfondire disponibilità, servizi inclusi ed eventuali costi aggiuntivi per circa 90 invitati.
+
+Potreste indicarci anche le prossime disponibilità per una visita alla location?
+
+Grazie ancora.
+
+Cordiali saluti,
+Raphaël e Kasia"""
 
 
 def _addresses(value: str) -> set[str]:
@@ -59,7 +72,8 @@ async def import_sheet_venues(settings: Settings) -> dict[str, int]:
     """Copy valid venue contacts from the existing Sheet into the app database."""
     if not settings.google_spreadsheet_id:
         raise ValueError("Google Sheet is not configured.")
-    token = await get_google_access_token(settings)
+    account_id = default_google_account_id()
+    token = await get_google_access_token(settings, account_id)
     sheets = GoogleSheetsClient(token, settings.google_spreadsheet_id)
     rows = await sheets.get_rows(settings.google_venues_sheet)
     imported = skipped = 0
@@ -89,7 +103,8 @@ async def refresh_existing_venue_metadata(settings: Settings) -> int:
     """Refresh reference fields for tracked venues without importing new rows."""
     if not settings.google_spreadsheet_id:
         return 0
-    token = await get_google_access_token(settings)
+    account_id = default_google_account_id()
+    token = await get_google_access_token(settings, account_id)
     rows = await GoogleSheetsClient(
         token, settings.google_spreadsheet_id
     ).get_rows(settings.google_venues_sheet)
@@ -174,7 +189,8 @@ async def send_venue_inquiry(
             return {"id": venue_id, "status": venue.status, "sent": False}
         email = venue.email
 
-    token = await get_google_access_token(settings)
+    account_id = default_google_account_id()
+    token = await get_google_access_token(settings, account_id)
     gmail = GmailClient(token, settings.google_gmail_user_id)
     existing = await gmail.search_message_ids(
         f"in:anywhere {{to:{email} from:{email}}}", max_results=1
@@ -198,6 +214,7 @@ async def send_venue_inquiry(
                 venue_id=venue_id,
                 gmail_message_id=result.message_id,
                 gmail_thread_id=result.thread_id,
+                gmail_account_id=account_id,
                 sent_at=now,
             )
         )
@@ -272,12 +289,11 @@ def _fallback_summary(value: str) -> str:
     return (summary or "Response received; synthesis pending.")[:220]
 
 
-async def reconcile_gmail_database(
-    settings: Settings, *, days: int = 365
+async def _reconcile_gmail_account(
+    settings: Settings, account_id: int, *, days: int = 365
 ) -> dict[str, object]:
-    """Persist new sent/reply messages once and synthesize replies for the UI."""
-    metadata_refreshed = await refresh_existing_venue_metadata(settings)
-    token = await get_google_access_token(settings)
+    """Persist messages for one connected Gmail account."""
+    token = await get_google_access_token(settings, account_id)
     gmail = GmailClient(token, settings.google_gmail_user_id)
     with SessionLocal() as session:
         venue_ids = [item for item in session.scalars(select(Venue.id)).all()]
@@ -306,7 +322,8 @@ async def reconcile_gmail_database(
             known_thread_ids.update(
                 session.scalars(
                     select(Outreach.gmail_thread_id).where(
-                        Outreach.venue_id == venue_id
+                        Outreach.venue_id == venue_id,
+                        Outreach.gmail_account_id == account_id,
                     )
                 ).all()
             )
@@ -327,7 +344,9 @@ async def reconcile_gmail_database(
                 continue
             with SessionLocal() as session:
                 if session.scalar(
-                    select(Message).where(Message.gmail_message_id == message.message_id)
+                    select(Message).where(
+                        Message.gmail_message_id == message.message_id
+                    )
                 ):
                     continue
             synthesis = ResponseSynthesis(summary="Message sent.")
@@ -345,6 +364,8 @@ async def reconcile_gmail_database(
                         venue_id=venue_id,
                         gmail_message_id=message.message_id,
                         gmail_thread_id=message.thread_id,
+                        gmail_account_id=account_id,
+                        rfc_message_id=message.rfc_message_id or "",
                         direction="outbound" if outgoing else "inbound",
                         subject=message.subject,
                         body=message.body,
@@ -363,6 +384,7 @@ async def reconcile_gmail_database(
                                 venue_id=venue_id,
                                 gmail_message_id=message.message_id,
                                 gmail_thread_id=message.thread_id,
+                                gmail_account_id=account_id,
                                 sent_at=_when(message.received_at),
                             )
                         )
@@ -404,16 +426,91 @@ async def reconcile_gmail_database(
                 elif venue.status in {"Sent", "Existing conversation"}:
                     venue.status = "Responded"
                 session.commit()
-    refreshed_at = datetime.now(UTC)
-    with SessionLocal() as session:
-        set_system_state(session, "gmail_last_refresh", iso_utc(refreshed_at))
     return {
         "new_messages": new_messages,
         "sent_confirmed": sent,
         "replies_synthesized": replies,
+    }
+
+
+async def reconcile_gmail_database(
+    settings: Settings, *, days: int = 365
+) -> dict[str, object]:
+    """Reconcile every connected Gmail account into one shared dashboard."""
+    accounts = list_google_accounts()
+    if not accounts:
+        raise FileNotFoundError("No Google OAuth credential is stored in the database.")
+    metadata_refreshed = await refresh_existing_venue_metadata(settings)
+    totals = {
+        "new_messages": 0,
+        "sent_confirmed": 0,
+        "replies_synthesized": 0,
+    }
+    synced_accounts: list[str] = []
+    for account in accounts:
+        result = await _reconcile_gmail_account(
+            settings, int(account["id"]), days=days
+        )
+        for key in totals:
+            totals[key] += int(result[key])
+        synced_accounts.append(str(account["email"]))
+    refreshed_at = datetime.now(UTC)
+    with SessionLocal() as session:
+        set_system_state(session, "gmail_last_refresh", iso_utc(refreshed_at))
+    return {
+        **totals,
         "metadata_refreshed": metadata_refreshed,
+        "accounts_synced": synced_accounts,
         "last_refreshed_at": iso_utc(refreshed_at),
     }
+
+
+def followup_preview(venue_id: int) -> dict[str, object]:
+    """Prepare, but do not send, a reply to the latest venue response."""
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        latest = session.scalar(
+            select(Message)
+            .where(Message.venue_id == venue_id, Message.direction == "inbound")
+            .order_by(Message.occurred_at.desc())
+        )
+        if latest is None:
+            raise ValueError("This venue has not replied yet.")
+        subject = latest.subject or OUTREACH_SUBJECT
+        if not subject.casefold().startswith(("re:", "r:")):
+            subject = f"Re: {subject}"
+        return {
+            "id": venue.id,
+            "venue": venue.name,
+            "recipient": venue.email,
+            "subject": subject,
+            "response_summary": venue.response_summary,
+            "body": FOLLOWUP_BODY,
+        }
+
+
+def update_venue_research(
+    venue_id: int,
+    *,
+    source_type: str,
+    source_url: str,
+    contact_name: str,
+    notes: str,
+) -> dict[str, object]:
+    """Store human research separately from official Gmail/quote data."""
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        venue.research_source_type = source_type.strip()
+        venue.research_source_url = source_url.strip()
+        venue.research_contact_name = contact_name.strip()
+        venue.research_notes = notes.strip()
+        venue.research_updated_at = datetime.now(UTC)
+        session.commit()
+        return {"id": venue.id, "saved": True}
 
 
 async def reply_to_venue(settings: Settings, venue_id: int, body: str) -> dict[str, object]:
@@ -431,7 +528,8 @@ async def reply_to_venue(settings: Settings, venue_id: int, body: str) -> dict[s
             raise ValueError("This venue has not replied yet.")
         latest_id = latest.gmail_message_id
         thread_id = latest.gmail_thread_id
-    token = await get_google_access_token(settings)
+        account_id = latest.gmail_account_id
+    token = await get_google_access_token(settings, account_id)
     gmail = GmailClient(token, settings.google_gmail_user_id)
     source = await gmail.get_message(latest_id)
     recipient = parseaddr(source.sender)[1] or venue.email
@@ -457,6 +555,7 @@ async def reply_to_venue(settings: Settings, venue_id: int, body: str) -> dict[s
             venue_id=venue_id,
             gmail_message_id=result.message_id,
             gmail_thread_id=result.thread_id,
+            gmail_account_id=account_id,
             direction="outbound",
             subject=subject,
             body=body.strip(),

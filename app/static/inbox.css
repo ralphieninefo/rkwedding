@@ -274,6 +274,22 @@
   white-space: nowrap;
 }
 
+.reply-context {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  background: var(--sage-100, #edf2ec);
+}
+
+.reply-context span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .outreach-dialog {
   width: min(720px, calc(100% - 32px));
   max-height: calc(100vh - 48px);

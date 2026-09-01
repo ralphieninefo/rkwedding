@@ -45,7 +45,7 @@ def test_legacy_token_is_imported_only_when_database_is_empty(
         set_system_state(session, gmail_oauth.TOKEN_STATE_KEY, '{"token":"database"}')
     gmail_oauth.TOKEN_PATH.write_text('{"token":"changed"}', encoding="utf-8")
 
-    assert gmail_oauth._stored_token() == '{"token":"database"}'
+    assert gmail_oauth._stored_token() == ('{"token":"database"}', None)
     with sessions() as session:
         assert get_system_state(session, gmail_oauth.TOKEN_STATE_KEY) == (
             '{"token":"database"}'

@@ -28,6 +28,7 @@ from app.models import (
     VenueOutreachEvent,
     VenueOutreachReceipt,
     VenueReply,
+    VenueResearchUpdate,
 )
 from app.scoring import rank_venues
 
@@ -127,12 +128,17 @@ async def venue_directory() -> FileResponse:
 
 
 @app.get("/api/gmail/status")
-async def gmail_status() -> dict[str, bool]:
-    from app.gmail_oauth import gmail_connected, oauth_setup_ready
+async def gmail_status() -> dict[str, object]:
+    from app.gmail_oauth import (
+        gmail_connected,
+        list_google_accounts,
+        oauth_setup_ready,
+    )
 
     return {
         "oauth_setup_ready": oauth_setup_ready(),
         "connected": gmail_connected(),
+        "accounts": list_google_accounts(),
         "spreadsheet_configured": bool(get_settings().google_spreadsheet_id),
     }
 
@@ -183,14 +189,14 @@ async def finish_google_auth(
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state.")
     if not code_verifier:
         raise HTTPException(status_code=400, detail="OAuth verifier is missing.")
-    await run_in_threadpool(
+    account = await run_in_threadpool(
         finish_authorization,
         redirect_uri,
         str(request.url),
         state,
         code_verifier,
     )
-    response = RedirectResponse("/?connected=1")
+    response = RedirectResponse(f"/?connected=1&account={account['id']}")
     response.delete_cookie("google_oauth_state")
     response.delete_cookie("google_oauth_code_verifier")
     return response
@@ -295,6 +301,30 @@ async def reply_to_venue(venue_id: int, reply: VenueReply) -> dict[str, object]:
         raise HTTPException(status_code=401, detail="Connect Google first.") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Gmail could not send the reply.") from exc
+
+
+@app.get("/api/venues/{venue_id}/followup-preview")
+async def preview_venue_followup(venue_id: int) -> dict[str, object]:
+    """Show an editable follow-up without sending it."""
+    from app.db_workflow import followup_preview
+
+    try:
+        return followup_preview(venue_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/venues/{venue_id}/research")
+async def save_venue_research(
+    venue_id: int, research: VenueResearchUpdate
+) -> dict[str, object]:
+    """Save separately labeled human research for one venue."""
+    from app.db_workflow import update_venue_research
+
+    try:
+        return update_venue_research(venue_id, **research.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/api/gmail/sync")

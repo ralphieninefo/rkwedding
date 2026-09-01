@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -55,6 +56,13 @@ class Venue(Base):
     vibe: Mapped[str] = mapped_column(String(250), default="")
     guest_capacity: Mapped[str] = mapped_column(String(100), default="")
     notes: Mapped[str] = mapped_column(Text, default="")
+    research_source_type: Mapped[str] = mapped_column(String(100), default="")
+    research_source_url: Mapped[str] = mapped_column(String(1000), default="")
+    research_contact_name: Mapped[str] = mapped_column(String(250), default="")
+    research_notes: Mapped[str] = mapped_column(Text, default="")
+    research_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(50), default="Draft")
     response_summary: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -79,6 +87,9 @@ class Outreach(Base):
     venue_id: Mapped[int] = mapped_column(ForeignKey("venues.id"), index=True)
     gmail_message_id: Mapped[str] = mapped_column(String(100), unique=True)
     gmail_thread_id: Mapped[str] = mapped_column(String(100), index=True)
+    gmail_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("google_accounts.id"), nullable=True, index=True
+    )
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     venue: Mapped[Venue] = relationship(back_populates="outreach")
 
@@ -90,6 +101,10 @@ class Message(Base):
     venue_id: Mapped[int] = mapped_column(ForeignKey("venues.id"), index=True)
     gmail_message_id: Mapped[str] = mapped_column(String(100), unique=True)
     gmail_thread_id: Mapped[str] = mapped_column(String(100), index=True)
+    gmail_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("google_accounts.id"), nullable=True, index=True
+    )
+    rfc_message_id: Mapped[str] = mapped_column(String(500), default="", index=True)
     direction: Mapped[str] = mapped_column(String(20))
     subject: Mapped[str] = mapped_column(String(500), default="")
     body: Mapped[str] = mapped_column(Text, default="")
@@ -116,6 +131,21 @@ class SystemState(Base):
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
+
+
+class GoogleAccount(Base):
+    __tablename__ = "google_accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    token_json: Mapped[str] = mapped_column(Text)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    connected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 def _database_url() -> str:
@@ -156,6 +186,11 @@ def init_database() -> None:
         "vibe": "VARCHAR(250) DEFAULT ''",
         "guest_capacity": "VARCHAR(100) DEFAULT ''",
         "notes": "TEXT DEFAULT ''",
+        "research_source_type": "VARCHAR(100) DEFAULT ''",
+        "research_source_url": "VARCHAR(1000) DEFAULT ''",
+        "research_contact_name": "VARCHAR(250) DEFAULT ''",
+        "research_notes": "TEXT DEFAULT ''",
+        "research_updated_at": "TIMESTAMP NULL",
     }
     with ENGINE.begin() as connection:
         for name, definition in additions.items():
@@ -164,6 +199,26 @@ def init_database() -> None:
             connection.execute(
                 text(f"ALTER TABLE venues ADD COLUMN {name} {definition}")
             )
+        table_additions = {
+            "outreach": {"gmail_account_id": "INTEGER NULL"},
+            "messages": {
+                "gmail_account_id": "INTEGER NULL",
+                "rfc_message_id": "VARCHAR(500) DEFAULT ''",
+            },
+        }
+        for table_name, requested in table_additions.items():
+            existing = {
+                column["name"]
+                for column in inspect(ENGINE).get_columns(table_name)
+            }
+            for name, definition in requested.items():
+                if name not in existing:
+                    connection.execute(
+                        text(
+                            f"ALTER TABLE {table_name} ADD COLUMN "
+                            f"{name} {definition}"
+                        )
+                    )
 
 
 def session_scope() -> Iterator[Session]:
@@ -231,6 +286,14 @@ def venue_payload(venue: Venue) -> dict[str, object]:
         "vibe": venue.vibe,
         "guest_capacity": venue.guest_capacity,
         "notes": venue.notes,
+        "research_source_type": venue.research_source_type,
+        "research_source_url": venue.research_source_url,
+        "research_contact_name": venue.research_contact_name,
+        "research_notes": venue.research_notes,
+        "research_updated_at": (
+            iso_utc(venue.research_updated_at)
+            if venue.research_updated_at else None
+        ),
         "status": venue.status,
         "created_at": iso_utc(venue.created_at) if venue.created_at else None,
         "last_activity_at": iso_utc(latest_activity) if latest_activity else None,
@@ -240,11 +303,25 @@ def venue_payload(venue: Venue) -> dict[str, object]:
         "price_minimum_eur": venue.estimate.minimum_eur if venue.estimate else None,
         "price_maximum_eur": venue.estimate.maximum_eur if venue.estimate else None,
         "price_note": venue.estimate.note if venue.estimate else "",
-        "gmail_url": (
-            f"https://mail.google.com/mail/u/0/#all/{gmail_thread_id}"
-            if gmail_thread_id else None
-        ),
+        "gmail_url": _gmail_url(gmail_thread_id, latest_reply, latest_outreach),
     }
+
+
+def _gmail_url(
+    thread_id: str | None,
+    latest_reply: Message | None,
+    latest_outreach: Outreach | None,
+) -> str | None:
+    if thread_id is None:
+        return None
+    item = latest_reply or latest_outreach
+    auth_user = "0"
+    if item is not None and item.gmail_account_id is not None:
+        with SessionLocal() as session:
+            account = session.get(GoogleAccount, item.gmail_account_id)
+            if account is not None:
+                auth_user = account.email
+    return f"https://mail.google.com/mail/?authuser={auth_user}#all/{thread_id}"
 
 
 def list_venues(session: Session) -> list[dict[str, object]]:

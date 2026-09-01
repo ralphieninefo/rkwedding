@@ -17,4 +17,14 @@
 .venue-summary { margin:20px 0 0; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; line-height:1.55; }
 .venue-notes { margin:8px 0 0; color:var(--muted); font-size:12px; line-height:1.55; }
 .venue-card-actions { display:flex; gap:8px; margin-top:18px; }
+.venue-research { margin-top:18px; padding:15px; border:1px solid #d9e2d8; border-radius:14px; background:#f2f6f1; }
+.venue-research>span { color:var(--green-dark); font-size:10px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+.venue-research p { margin:7px 0 0; color:var(--ink); font-size:13px; line-height:1.55; white-space:pre-wrap; }
+.venue-research small { display:block; margin-top:8px; color:var(--muted); }
+.venue-research a { color:var(--green-dark); }
+.research-form { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.research-form label span { display:block; margin-bottom:7px; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.research-form input,.research-form select,.research-form textarea { width:100%; padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--ink); }
+.research-form .research-notes,.research-form .form-message,.research-form .outreach-dialog-actions { grid-column:1/-1; }
+.research-form textarea { min-height:220px; resize:vertical; }
 @media (max-width:850px) { .directory-hero{align-items:flex-start;flex-direction:column;padding-top:38px}.venue-directory{grid-template-columns:1fr}.venue-meta{grid-template-columns:1fr} }

@@ -196,6 +196,15 @@ class VenueReply(BaseModel):
     body: str = Field(min_length=1, max_length=10_000)
 
 
+class VenueResearchUpdate(BaseModel):
+    """Human-sourced research kept separate from official venue quotes."""
+
+    source_type: str = Field(default="", max_length=100)
+    source_url: str = Field(default="", max_length=1_000)
+    contact_name: str = Field(default="", max_length=250)
+    notes: str = Field(default="", max_length=20_000)
+
+
 class VenueDiscoveryRequest(BaseModel):
     """Public venue website to inspect for contact details."""
 

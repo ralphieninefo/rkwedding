@@ -100,6 +100,48 @@ def test_saved_draft_message_can_be_previewed(monkeypatch) -> None:
     assert response.json()["body"] == "Buongiorno"
 
 
+def test_followup_can_be_previewed_without_sending(monkeypatch) -> None:
+    def fake_preview(venue_id):
+        return {
+            "id": venue_id,
+            "venue": "Villa Test",
+            "recipient": "info@example.com",
+            "subject": "Re: Preventivo",
+            "response_summary": "Quote received.",
+            "body": "Grazie per il preventivo.",
+        }
+
+    monkeypatch.setattr("app.db_workflow.followup_preview", fake_preview)
+
+    response = client.get("/api/venues/13/followup-preview")
+
+    assert response.status_code == 200
+    assert response.json()["subject"] == "Re: Preventivo"
+
+
+def test_human_research_is_saved_separately(monkeypatch) -> None:
+    captured = {}
+
+    def fake_save(venue_id, **research):
+        captured.update(research)
+        return {"id": venue_id, "saved": True}
+
+    monkeypatch.setattr("app.db_workflow.update_venue_research", fake_save)
+    response = client.patch(
+        "/api/venues/13/research",
+        json={
+            "source_type": "Reddit",
+            "source_url": "https://reddit.com/example",
+            "contact_name": "Helpful bride",
+            "notes": "Great direct feedback.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"id": 13, "saved": True}
+    assert captured["source_type"] == "Reddit"
+
+
 def test_hosted_dashboard_requires_password(monkeypatch) -> None:
     settings = Settings(
         _env_file=None,

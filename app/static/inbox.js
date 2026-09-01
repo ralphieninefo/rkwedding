@@ -28,10 +28,20 @@ const outreachRecipient = document.querySelector("#outreachRecipient");
 const outreachSubject = document.querySelector("#outreachSubject");
 const outreachBody = document.querySelector("#outreachBody");
 const outreachDialogMessage = document.querySelector("#outreachDialogMessage");
+const followupDialog = document.querySelector("#followupDialog");
+const closeFollowupDialog = document.querySelector("#closeFollowupDialog");
+const cancelFollowup = document.querySelector("#cancelFollowup");
+const confirmFollowup = document.querySelector("#confirmFollowup");
+const followupSummary = document.querySelector("#followupSummary");
+const followupRecipient = document.querySelector("#followupRecipient");
+const followupSubject = document.querySelector("#followupSubject");
+const followupBody = document.querySelector("#followupBody");
+const followupDialogMessage = document.querySelector("#followupDialogMessage");
 let allVenues = [];
 let pendingOutreachVenue = null;
 let pendingOutreachButton = null;
 let pendingOutreachButtonText = "";
+let pendingFollowupVenue = null;
 
 const formatDate = (value) => value
   ? new Date(value).toLocaleString([], {dateStyle: "medium", timeStyle: "short"})
@@ -108,6 +118,30 @@ const openOutreachPreview = async (venue, button) => {
   }
 };
 
+const openFollowupPreview = async (venue, button) => {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Loading reply…";
+  try {
+    const response = await fetch(`/api/venues/${venue.id}/followup-preview`);
+    const preview = await response.json();
+    if (!response.ok) throw new Error(preview.detail || "Could not prepare reply.");
+    pendingFollowupVenue = venue;
+    followupSummary.textContent = preview.response_summary || "Response received.";
+    followupRecipient.value = preview.recipient;
+    followupSubject.value = preview.subject;
+    followupBody.value = preview.body;
+    followupDialogMessage.textContent = "";
+    followupDialog.showModal();
+  } catch (error) {
+    trackerMessage.hidden = false;
+    trackerMessage.textContent = error instanceof Error ? error.message : "Could not prepare reply.";
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+};
+
 const renderVenues = (venues) => {
   responseRows.replaceChildren();
   venues.forEach((venue) => {
@@ -156,15 +190,21 @@ const renderVenues = (venues) => {
         openOutreachPreview(venue, send).catch(() => {});
       });
       actions.append(send);
-    } else if (venue.gmail_url) {
+    } else if (venue.responded_at) {
+      const review = document.createElement("button");
+      review.className = "button button-primary reply-button";
+      review.type = "button";
+      review.textContent = "Review & reply";
+      review.addEventListener("click", () => openFollowupPreview(venue, review));
+      actions.append(review);
+    }
+    if (venue.gmail_url) {
       const reply = document.createElement("a");
       reply.className = "button button-secondary reply-button";
       reply.href = venue.gmail_url;
       reply.target = "_blank";
       reply.rel = "noopener";
-      reply.textContent = venue.responded_at
-        ? "View reply in Gmail"
-        : "Open in Gmail";
+      reply.textContent = "Open in Gmail";
       actions.append(reply);
     }
 
@@ -220,6 +260,40 @@ confirmOutreach.addEventListener("click", async () => {
       ? error.message : "Could not send inquiry.";
     confirmOutreach.disabled = false;
     confirmOutreach.textContent = "Send inquiry";
+  }
+});
+
+const closeFollowup = () => followupDialog.close();
+closeFollowupDialog.addEventListener("click", closeFollowup);
+cancelFollowup.addEventListener("click", closeFollowup);
+followupDialog.addEventListener("close", () => {
+  pendingFollowupVenue = null;
+  confirmFollowup.disabled = false;
+  confirmFollowup.textContent = "Send reply";
+  followupDialogMessage.textContent = "";
+});
+confirmFollowup.addEventListener("click", async () => {
+  if (!pendingFollowupVenue || !followupBody.value.trim()) return;
+  confirmFollowup.disabled = true;
+  confirmFollowup.textContent = "Sending…";
+  followupDialogMessage.textContent = "Sending in the existing Gmail thread…";
+  try {
+    const response = await fetch(`/api/venues/${pendingFollowupVenue.id}/reply`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({body: followupBody.value.trim()}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Could not send reply.");
+    const venueName = pendingFollowupVenue.name;
+    followupDialog.close();
+    await loadVenues();
+    trackerMessage.hidden = false;
+    trackerMessage.textContent = `Reply sent to ${venueName}.`;
+  } catch (error) {
+    followupDialogMessage.textContent = error instanceof Error ? error.message : "Could not send reply.";
+    confirmFollowup.disabled = false;
+    confirmFollowup.textContent = "Send reply";
   }
 });
 
@@ -330,9 +404,11 @@ const checkStatus = async () => {
   const status = await response.json();
   setupPanel.hidden = status.oauth_setup_ready;
   if (status.connected) {
-    gmailStatus.textContent = "Gmail connected";
+    const accountCount = status.accounts?.length || 1;
+    gmailStatus.textContent = accountCount === 1 ? "1 Gmail connected" : `${accountCount} Gmail accounts`;
+    gmailBadge.title = (status.accounts || []).map((account) => account.email).join("\n");
     gmailBadge.classList.remove("badge-muted", "badge-offline");
-    connectButton.hidden = true;
+    connectButton.hidden = false;
     syncButton.disabled = false;
   } else if (status.oauth_setup_ready) {
     gmailStatus.textContent = "Google not connected";

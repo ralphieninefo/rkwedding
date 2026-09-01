@@ -35,7 +35,7 @@
           <p class="hero-description">Add venues, send an inquiry, and see a concise synthesis when they reply.</p>
         </div>
         <div class="inbox-actions">
-          <a class="button button-secondary connect-button" id="connectButton" href="/auth/google/start">Connect Google</a>
+          <a class="button button-secondary connect-button" id="connectButton" href="/auth/google/start">Add Gmail account</a>
           <button class="button button-secondary" id="addVenueButton" type="button">Add venue</button>
           <button class="button button-primary" id="syncButton" type="button" disabled>Check Gmail <span aria-hidden="true">↻</span></button>
         </div>
@@ -117,10 +117,34 @@
       </div>
     </dialog>
 
+    <dialog class="outreach-dialog" id="followupDialog" aria-labelledby="followupDialogTitle">
+      <div class="outreach-dialog-heading">
+        <div>
+          <p class="eyebrow">Review before sending</p>
+          <h2 id="followupDialogTitle">Reply to venue</h2>
+        </div>
+        <button class="dialog-close" id="closeFollowupDialog" type="button" aria-label="Close reply">×</button>
+      </div>
+      <div class="reply-context">
+        <span>Latest response synthesis</span>
+        <strong id="followupSummary"></strong>
+      </div>
+      <div class="outreach-preview-fields">
+        <label><span>To</span><input id="followupRecipient" type="text" readonly></label>
+        <label><span>Subject</span><input id="followupSubject" type="text" readonly></label>
+        <label class="outreach-message"><span>Your reply</span><textarea id="followupBody"></textarea></label>
+      </div>
+      <p class="form-message" id="followupDialogMessage" role="status"></p>
+      <div class="outreach-dialog-actions">
+        <button class="button button-secondary" id="cancelFollowup" type="button">Cancel</button>
+        <button class="button button-primary" id="confirmFollowup" type="button">Send reply</button>
+      </div>
+    </dialog>
+
     <footer class="site-footer">
       <span>Control center · Private app database</span>
       <a href="/venues">Full venue directory ↗</a>
     </footer>
-    <script src="/static/inbox.js?v=20260830-4" defer></script>
+    <script src="/static/inbox.js?v=20260831-1" defer></script>
   </body>
 </html>
