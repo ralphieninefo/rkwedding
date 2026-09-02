@@ -1,114 +1,288 @@
-# Wedding Venue Agent Architecture
+# Wedding Venue Control Center Architecture
 
-## System boundary
+Current production architecture as of September 1, 2026.
 
-The application is an event-driven wedding venue workflow, not a continuously running agent session.
+## 1. System intent
 
-```text
-Gmail push event
-      |
-      v
-FastAPI service on DigitalOcean App Platform
-      |
-      +--> Load the complete Gmail thread
-      +--> Load the matching Google Sheet row
-      |
-      v
-DigitalOcean Serverless Inference
-      |
-      v
-Validated structured decision
-      |
-      +--> Update Google Sheet state
-      +--> Create a Gmail draft
-      +--> Request human approval when required
+This is a private workflow application for finding a wedding venue. It is not a general autonomous agent and it is not a spreadsheet automation project.
+
+The application handles four bounded jobs:
+
+1. onboard venue contact information;
+2. send reviewed Gmail outreach;
+3. ingest and track replies;
+4. turn replies into concise English decision data.
+
+## 2. Production topology
+
+```mermaid
+flowchart TB
+    subgraph Browser["Private browser session"]
+        UI1["Tracking dashboard"]
+        UI2["Venue directory"]
+        LOGIN["Login page"]
+    end
+
+    subgraph DO["DigitalOcean App Platform"]
+        WEB["FastAPI web service<br/>stateless container"]
+        JOB["gmail-sync scheduled job<br/>every 15 minutes"]
+        PG[("Managed PostgreSQL")]
+        KIMI["Serverless Inference<br/>Kimi K3"]
+    end
+
+    subgraph Google["Google"]
+        OAUTH["OAuth 2.0"]
+        G1["Personal Gmail"]
+        G2["Shared wedding Gmail<br/>primary for new outreach"]
+        SHEET["Venue research Sheet"]
+    end
+
+    SITES["Public venue websites"]
+
+    LOGIN -->|signed HttpOnly cookie| WEB
+    UI1 --> WEB
+    UI2 --> WEB
+    WEB <--> PG
+    JOB <--> PG
+    WEB <--> OAUTH
+    WEB <--> G1
+    WEB <--> G2
+    JOB <--> G1
+    JOB <--> G2
+    WEB --> SITES
+    JOB --> SHEET
+    WEB --> KIMI
+    JOB --> KIMI
 ```
 
-Initial outreach is a second event path:
+### Deployment components
 
-```text
-Venues row changed to Ready
-      |
-      v
-Installable Apps Script trigger
-      |
-      v
-FastAPI duplicate check
-      |
-      +--> Gmail draft (default)
-      +--> Venue row status update
+| Component | Runtime responsibility | Durable state? |
+|---|---|:---:|
+| `web` | UI, APIs, login, OAuth callbacks, contact discovery, preview/send actions | No |
+| `gmail-sync` | Scheduled Gmail/Sheet reconciliation and reply synthesis | No |
+| Managed PostgreSQL | Workflow records, normalized messages, OAuth tokens, estimates, checkpoints | Yes |
+| Serverless Inference | Stateless structured reply extraction | No |
+
+App Platform containers are replaceable. No required production state lives in the container filesystem.
+
+## 3. Data ownership
+
+```mermaid
+erDiagram
+    VENUE ||--o{ OUTREACH : has
+    VENUE ||--o{ MESSAGE : has
+    VENUE ||--o| PRICE_ESTIMATE : has
+    GOOGLE_ACCOUNT ||--o{ OUTREACH : sends
+    GOOGLE_ACCOUNT ||--o{ MESSAGE : owns
+
+    VENUE {
+        int id PK
+        string name
+        string region
+        string location
+        string email UK
+        string status
+        text response_summary
+        text research_notes
+    }
+    OUTREACH {
+        int id PK
+        int venue_id FK
+        int gmail_account_id FK
+        string gmail_message_id UK
+        string gmail_thread_id
+        datetime sent_at
+    }
+    MESSAGE {
+        int id PK
+        int venue_id FK
+        int gmail_account_id FK
+        string gmail_message_id UK
+        string direction
+        text body
+        text synthesized_summary
+        datetime occurred_at
+    }
+    PRICE_ESTIMATE {
+        int id PK
+        int venue_id FK
+        float minimum_eur
+        float maximum_eur
+        text note
+    }
+    GOOGLE_ACCOUNT {
+        int id PK
+        string email UK
+        text token_json
+        boolean is_primary
+    }
 ```
 
-The dashboard is a control and review surface. It never receives cloud credentials and does not call DigitalOcean directly.
+Additional `SystemState` records hold small checkpoints such as the latest successful Gmail refresh.
 
-## Component responsibilities
+PostgreSQL is authoritative for the dashboard. Gmail remains authoritative for complete conversation history. Google Sheets is a reference/import surface and may refresh non-empty venue metadata; it does not own runtime workflow status.
 
-### FastAPI application
+## 4. Venue onboarding and initial outreach
 
-- Receives normalized Gmail events.
-- Loads durable state from Gmail and Google Sheets.
-- Calls Serverless Inference with the wedding policy and current context.
-- Validates the model response.
-- Applies approval rules before calling external tools.
-- Serves the local dashboard and, later, the deployed dashboard.
+```mermaid
+sequenceDiagram
+    actor Human as Kassia or Raphaël
+    participant UI as Browser UI
+    participant API as FastAPI
+    participant Site as Venue website
+    participant DB as PostgreSQL
+    participant Gmail as Shared Gmail
 
-### DigitalOcean Serverless Inference
+    Human->>UI: Paste venue URL
+    UI->>API: POST /api/venues/discover
+    API->>Site: Fetch public HTML
+    Site-->>API: Contact and address markup
+    API-->>UI: Name, region, location, email, phone
+    Human->>UI: Review and save
+    UI->>API: POST /api/venues
+    API->>DB: Upsert draft venue
+    Human->>UI: Review exact inquiry
+    UI->>API: GET outreach preview
+    Human->>UI: Confirm send
+    UI->>API: POST /api/venues/{id}/send
+    API->>DB: Resolve GOOGLE_PRIMARY_EMAIL account
+    API->>Gmail: Send message
+    Gmail-->>API: Message ID and thread ID
+    API->>DB: Store outreach and Sent status
+```
 
-- Performs message classification, fact extraction, quote analysis, and recommended-action reasoning.
-- Returns structured data; it does not own workflow state.
-- Uses `DIGITALOCEAN_MODEL_ACCESS_KEY` on the server only.
+Website discovery blocks credentials, non-HTTP schemes, private IP addresses, and redirect escapes. Sending is always a separate human-confirmed action.
 
-### Gmail
+## 5. Automatic reply ingestion
 
-- Provides event ingress and complete conversation history.
-- Stores venue correspondence as durable business context.
-- Receives drafts by default; automatic sending remains disabled until explicitly approved.
+```mermaid
+sequenceDiagram
+    participant Cron as App Platform scheduler
+    participant Job as gmail-sync
+    participant DB as PostgreSQL
+    participant Gmail as Gmail API
+    participant Sheet as Google Sheets
+    participant Kimi as Kimi K3
+    participant UI as Dashboard
 
-### Google Sheets
+    Cron->>Job: Start every 15 minutes
+    Job->>DB: Load connected Google accounts and venues
+    Job->>Sheet: Refresh non-empty venue metadata
+    loop Each connected Gmail account
+        Job->>Gmail: Search tracked addresses and known threads
+        Gmail-->>Job: Normalized messages
+        Job->>DB: Skip known Gmail message IDs
+        Job->>Kimi: Inbound subject/body only
+        Kimi-->>Job: Validated English synthesis and estimate
+        Job->>DB: Store message, status, summary, estimate
+    end
+    Job->>DB: Store successful refresh timestamp
+    UI->>DB: GET /api/venues on load and every minute
+```
 
-- Acts as the initial venue CRM and workflow-state store.
-- Tracks contact state, quotes, inclusions, missing information, follow-up dates, and viewing status.
-- Stores Gmail history checkpoints and processed message IDs in the `System` tab.
+The dashboard does not need to trigger Gmail. It reads the last committed PostgreSQL state immediately. The maximum expected ingestion delay is the 15-minute scheduler interval plus processing time.
 
-### Deterministic scoring
+## 6. Follow-up replies
 
-- Computes shortlist rankings from explicit price, location, value, availability, quality, and logistics inputs.
-- Uses fixed weights and reports missing fields; the model never chooses the winner.
-- Keeps ranking decisions reproducible and auditable as preferences change.
+New outreach uses the configured primary shared account. A follow-up uses `gmail_account_id` from the inbound message so it stays in the account and thread that actually received the reply.
 
-### DigitalOcean MCP
+```mermaid
+sequenceDiagram
+    actor Human
+    participant UI
+    participant API
+    participant DB
+    participant Gmail
 
-- Gives Codex controlled access to DigitalOcean documentation, the model catalog, App Platform configuration, deployments, and logs.
-- Uses `DIGITALOCEAN_API_TOKEN`.
-- Is a development and operations tool; the wedding application does not depend on MCP at runtime.
+    Human->>UI: Review and reply
+    UI->>API: GET follow-up preview
+    API->>DB: Load latest inbound message and synthesis
+    API-->>UI: Recipient, subject, editable body
+    Human->>UI: Edit and confirm
+    UI->>API: POST reply
+    API->>DB: Resolve owning Gmail account
+    API->>Gmail: Send in original thread
+    API->>DB: Store outbound message and Replied status
+```
 
-## Credentials
+## 7. Authentication and credentials
 
-| Credential | Consumer | Purpose | Repository policy |
-|---|---|---|---|
-| `DIGITALOCEAN_API_TOKEN` | Codex MCP or `doctl` | Manage DigitalOcean resources | Never store or commit |
-| `DIGITALOCEAN_MODEL_ACCESS_KEY` | FastAPI backend | Call Serverless Inference | `.env` locally; encrypted runtime secret in App Platform |
-| Google OAuth credentials | FastAPI backend | Gmail and Sheets access | Never expose to browser or commit |
+### Dashboard authentication
 
-## Approval boundaries
+- A normal login form accepts the control-center username and password.
+- The password never enters the repository.
+- Successful login creates an HMAC-signed, HttpOnly, Secure, SameSite=Lax cookie.
+- The default session duration is seven days.
+- Public routes are limited to login assets, OAuth information pages, health, and webhook paths.
 
-Human approval is required before:
+### Google authorization
 
-- sending negotiation replies;
-- confirming or changing a viewing;
-- creating a binding calendar event;
-- accepting pricing or contractual terms;
-- paying a deposit;
-- creating, updating, or deleting paid cloud resources.
+- Dashboard access does not grant permission to attach any Google account.
+- OAuth callbacks identify the Gmail address before storing credentials.
+- New addresses must be in `GOOGLE_ALLOWED_EMAILS`; existing accounts may reauthorize.
+- Refreshable OAuth token JSON is stored in PostgreSQL.
+- `GOOGLE_PRIMARY_EMAIL` selects the sender for new inquiries.
 
-Read-only discovery, local tests, draft generation, and non-binding Sheet updates can be automated once their integrations are verified.
+### Secret placement
 
-## Delivery phases
+| Secret | Stored in production | Browser exposure |
+|---|---|:---:|
+| Dashboard password | App Platform encrypted environment | Entered only at login |
+| OAuth client secret | App Platform encrypted environment | No |
+| Gmail refreshable tokens | PostgreSQL | No |
+| Model access key | App Platform encrypted environment on web and worker | No |
+| PostgreSQL URL | App Platform managed binding | No |
 
-1. Establish and inspect the Git baseline.
-2. Confirm architecture and policy boundaries.
-3. Connect Codex to DigitalOcean MCP with least-privilege credentials.
-4. Implement and test Serverless Inference locally.
-5. Connect Gmail and Google Sheets using test data and draft-only behavior.
-6. Finish the dashboard against verified backend capabilities.
-7. Prepare and approve an App Platform deployment.
+## 8. AI contract
+
+The application sends a bounded prompt containing venue name, message subject, and at most 6,000 characters of body text. The expected output is validated as:
+
+```json
+{
+  "summary": "Concise English facts",
+  "status": "responded | quote_received | viewing_offered | unavailable | needs_reply",
+  "estimated_total_min_eur": 0,
+  "estimated_total_max_eur": 0,
+  "price_note": "Calculation basis or missing-cost note"
+}
+```
+
+The model cannot call Gmail or write to PostgreSQL. Invalid, timed-out, or unavailable inference falls back to a non-destructive response marker; stored fallback records can be re-synthesized later.
+
+## 9. Reliability behavior
+
+- Gmail message IDs are unique in PostgreSQL, preventing duplicate ingestion.
+- Known Gmail thread IDs catch replies sent from a venue employee's personal address.
+- Metadata refresh writes only non-empty Sheet values.
+- PostgreSQL uses connection pre-ping to recover stale pooled connections.
+- `/health` is the App Platform service probe.
+- A failed inference does not lose the underlying email body.
+- A failed scheduled run leaves the last successful database snapshot available to the UI.
+
+## 10. Active versus legacy paths
+
+### Active production path
+
+- FastAPI UI/API
+- PostgreSQL workflow database
+- multi-account Google OAuth
+- Gmail API polling every 15 minutes
+- Google Sheets metadata refresh
+- Kimi structured response synthesis
+
+### Present but not central to production
+
+- older event/webhook routes in `app/main.py`;
+- deterministic comparison prototype at `/analysis`;
+- PDF text extraction helper;
+- Google Pub/Sub handlers.
+
+These remain for compatibility or future work, but scheduled database reconciliation is the current production ingestion architecture.
+
+## 11. Next architectural increments
+
+1. Feed text-based PDF attachments into the same validated synthesis contract.
+2. Add an operator-visible scheduled-sync health indicator and error history.
+3. Add shortlist and visit entities only after quote coverage is reliable.
+4. Replace ad hoc schema additions with a formal migration tool if the data model grows materially.
