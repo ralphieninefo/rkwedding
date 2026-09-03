@@ -10,29 +10,42 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-245843?style=flat-square)
 ![DigitalOcean](https://img.shields.io/badge/DigitalOcean-App_Platform-0069ff?style=flat-square)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-managed-336791?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-82_passing-dfe9df?style=flat-square&labelColor=245843)
+![Tests](https://img.shields.io/badge/tests-122_passing-dfe9df?style=flat-square&labelColor=245843)
 
 </div>
 
 ## What exists today
 
-The app supports the real venue workflow end to end:
+The home screen is a next-action queue, not a spreadsheet. The app supports the
+real venue workflow end to end:
 
 ```text
 Paste website → Review contact → Review and send inquiry → Track thread
-      → Receive reply → Generate English synthesis and price estimate → Reply
+      → Receive reply (PDF quotes included) → Generate English synthesis,
+      price, availability, and capacity → Reply, or chase after a week of silence
+      → Shortlist, pass, or plan a visit → Compare shortlisted venues against budget
 ```
 
 - Discover a venue name, address, region, email, website, and phone from its public website.
 - Preview every initial inquiry before explicitly sending it.
-- Send new inquiries from the configured shared wedding Gmail account.
+- Send new inquiries from the configured shared wedding Gmail account, after
+  checking every connected mailbox (not only the sender) for an existing
+  conversation with that address.
 - Track correspondence across both connected Gmail accounts without merging identities.
 - Poll Gmail automatically every 15 minutes and reconcile messages idempotently.
 - Show the saved PostgreSQL venue list immediately; the browser refreshes that view every minute.
-- Summarize Italian replies in English with Kimi through DigitalOcean Serverless Inference.
-- Extract structured status and estimated pricing for 90 guests.
+- Summarize Italian replies in English with Kimi through DigitalOcean Serverless Inference,
+  reading embedded text from PDF quote attachments alongside the email body.
+- Extract structured status, estimated pricing for 90 guests, stated availability,
+  and stated guest capacity.
+- Automatically retry a bounded batch of replies whose synthesis failed
+  transiently, on every scheduled sync, without re-fetching Gmail.
 - Preview, edit, and explicitly send follow-up replies in the original Gmail thread.
-- Search and filter the tracking dashboard, or open the complete venue directory.
+- Send a polite reminder in the original thread when a venue has stayed silent.
+- Record a shortlist/pass decision and an optional visit date per venue, and
+  compare shortlisted venues against the couple's budget.
+- Draft an Italian reply from the couple's English talking points with Kimi;
+  nothing sends until a person reviews and confirms it.
 - Keep human research notes separate from official venue replies and quotes.
 - Mirror Gmail attachments into one private Spaces bucket and show them beside
   the venue with short-lived **View** and **Open in Gmail** links.
@@ -70,8 +83,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for data ownership, sequence di
 
 | Route | Purpose |
 |---|---|
-| `/` | Outreach tracking, filters, venue onboarding, message previews, and replies. |
-| `/venues` | Complete reference directory with contact, research, pricing, and activity details. |
+| `/` | Home: a next-action queue grouped by stage (reply needed, waiting, draft, shortlist, closed), guided add-venue, and a Settings corner for Gmail accounts, sync health, and budget. |
+| `/venues/{id}` | Venue dossier: conversation timeline, facts, documents, notes, shortlist/pass/edit, and reminder/reply actions. |
+| `/venues` | Compact all-venues list plus a shortlist-vs-budget comparison table. |
 | `/login` | Application-owned login that creates a seven-day signed HttpOnly session. |
 | `/about` and `/privacy` | Public OAuth information pages. |
 | `/health` | Public deployment health probe. |
@@ -91,12 +105,14 @@ Google OAuth grants the app Gmail read/send access. Google Sheets and Pub/Sub ar
 
 ## AI boundary
 
-Kimi has one bounded responsibility: convert an inbound venue response into validated structured data:
+Kimi has two bounded responsibilities, both validated by FastAPI before anything is stored or shown:
 
-- concise English summary;
-- workflow status;
-- minimum and maximum estimated total for 90 guests;
-- short pricing-basis note.
+- Convert an inbound venue response (plus any embedded PDF quote text already
+  mirrored to Spaces) into validated structured data: concise English summary,
+  workflow status, minimum and maximum estimated total for 90 guests, a short
+  pricing-basis note, stated availability, and stated guest capacity.
+- Turn the couple's English talking points into an Italian reply draft, shown
+  only in the reply editor for human review.
 
 Kimi does not send email, mutate OAuth credentials, select a venue, or control workflow state. FastAPI validates model output and owns every database write.
 
@@ -156,15 +172,16 @@ app/
 ├── main.py             HTTP routes, auth boundary, and UI entry points
 ├── database.py         PostgreSQL/SQLite models and dashboard projections
 ├── db_workflow.py      Sending, Gmail reconciliation, synthesis, and replies
+├── venue_state.py       Pure derivation of stage/next-action from raw data
 ├── discovery.py        Safe public website contact/address discovery
 ├── gmail.py            Gmail API client and message normalization
 ├── gmail_oauth.py      Multi-account OAuth and database-backed tokens
-├── inference.py        Kimi structured English synthesis
+├── inference.py        Kimi structured English synthesis and reply drafting
 ├── session_auth.py     Signed control-center session cookies
 ├── scheduled_sync.py   App Platform scheduled worker entry point
 ├── storage.py          Private Spaces uploads and short-lived viewing URLs
-├── documents.py        Embedded PDF-text extraction helper
-└── static/             Login, tracking, and venue-directory interfaces
+├── documents.py        Embedded PDF-text extraction feeding synthesis
+└── static/             Home queue, venue dossier, and all-venues interfaces
 
 docs/ARCHITECTURE.md    Detailed current-state architecture
 tests/                  API, workflow, OAuth, discovery, and scoring tests
@@ -191,16 +208,20 @@ Runtime secrets are configured as encrypted App Platform variables. Blank secret
 - Full message bodies are excluded from dashboard API responses.
 - Dashboard access and Gmail authorization are separate security decisions.
 - Website discovery accepts public HTTP(S) targets only and blocks private network addresses.
-- Attachments are mirrored for viewing, but their contents are not automatically
-  sent to Kimi or OCR. Gmail remains authoritative for the original email.
+- Embedded text from PDF attachments feeds the English synthesis; scanned
+  (image-only) PDFs are mirrored for viewing but not OCR'd. Gmail remains
+  authoritative for the original email.
 - Gmail ingestion uses scheduled polling, so a reply may take up to 15 minutes to appear.
 - Venue selection, contract acceptance, deposits, and calendar booking remain manual.
 
 ## Near-term roadmap
 
-1. Check every connected mailbox (and stored messages) before a first inquiry so
-   a venue already contacted from the personal mailbox is never e-mailed twice.
-2. Show attachment-failure diagnostics beside the mailbox sync health that the
+1. Show attachment-failure diagnostics beside the mailbox sync health that the
    dashboard already displays.
-3. Optionally extract embedded PDF text for quote synthesis; keep OCR on demand.
-4. Add shortlist and visit-planning views once quote data is sufficiently complete.
+2. Extract structured line-item terms (deposit, inclusions, payment schedule)
+   from PDF quotes, beyond the current price/availability/capacity fields.
+3. Remove or quarantine the pre-PostgreSQL Sheet/Pub/Sub/agent prototype code
+   (`app/workflow.py`, `app/sheets.py`, `app/agent.py`, the `/events/*` and
+   `/api/gmail/sync` routes, and related modules) once nothing depends on it.
+4. Replace ad hoc `ALTER TABLE` schema additions with a formal migration tool
+   if the data model grows materially beyond its current size.

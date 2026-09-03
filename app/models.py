@@ -188,6 +188,9 @@ class ResponseSynthesis(BaseModel):
     estimated_total_min_eur: float | None = Field(default=None, ge=0)
     estimated_total_max_eur: float | None = Field(default=None, ge=0)
     price_note: str = Field(default="", max_length=300)
+    # Short facts stated by the venue; empty when the reply does not say.
+    availability: str = Field(default="", max_length=500)
+    guest_capacity: str = Field(default="", max_length=100)
 
 
 class VenueReply(BaseModel):

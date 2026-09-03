@@ -11,25 +11,9 @@ from app.database import (
     sort_venue_payloads,
     venue_payload,
 )
-from app.db_workflow import _fallback_summary, _is_incoming
+from app.db_workflow import _apply_facts, _is_incoming
 from app.gmail import GmailMessage
-
-
-def test_fallback_summary_removes_quoted_outreach_and_stays_concise() -> None:
-    body = """Gentili Raphaël e Kassia,
-
-Siamo disponibili e vi invieremo il preventivo domani. Possiamo ospitare 120 persone.
-
-Il 29 agosto Raphaël ha scritto:
-> Buongiorno,
-> vorremmo informazioni per il matrimonio.
-"""
-
-    summary = _fallback_summary(body)
-
-    assert "Siamo disponibili" in summary
-    assert "Buongiorno" not in summary
-    assert len(summary) <= 220
+from app.models import ResponseSynthesis
 
 
 def test_reply_from_staff_address_matches_known_outreach_thread() -> None:
@@ -161,3 +145,33 @@ def test_draft_creation_is_not_counted_as_message_activity() -> None:
     )
 
     assert venue_payload(venue)["last_activity_at"] is None
+
+
+def test_apply_facts_records_availability_and_capacity_when_stated() -> None:
+    venue = Venue(name="Villa Facts", email="facts@example.com")
+
+    _apply_facts(
+        venue,
+        ResponseSynthesis(
+            summary="Free on 3 October, up to 120 seated.",
+            availability="Free on 3 October 2026.",
+            guest_capacity="up to 120 seated",
+        ),
+    )
+
+    assert venue.availability == "Free on 3 October 2026."
+    assert venue.guest_capacity == "up to 120 seated"
+
+
+def test_apply_facts_leaves_existing_values_when_not_restated() -> None:
+    venue = Venue(
+        name="Villa Facts",
+        email="facts@example.com",
+        availability="Free on 3 October 2026.",
+        guest_capacity="up to 120 seated",
+    )
+
+    _apply_facts(venue, ResponseSynthesis(summary="Grazie mille."))
+
+    assert venue.availability == "Free on 3 October 2026."
+    assert venue.guest_capacity == "up to 120 seated"

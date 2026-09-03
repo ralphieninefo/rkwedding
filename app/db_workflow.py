@@ -4,14 +4,14 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from email.utils import getaddresses, parseaddr
-import re
 
 import httpx
 from botocore.exceptions import BotoCoreError, ClientError
 from google.auth.exceptions import GoogleAuthError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.config import Settings
+from app.documents import NO_EMBEDDED_TEXT, attachment_text
 from app.database import (
     BUDGET_KEY,
     LAST_REFRESH_KEY,
@@ -248,18 +248,35 @@ async def send_venue_inquiry(
     }
 
 
+FALLBACK_SUMMARY = "Response received; English synthesis is temporarily unavailable."
+# Bound the attachment text handed to Kimi alongside the e-mail body.
+ATTACHMENT_TEXT_LIMIT = 8_000
+# How many placeholder summaries one scheduled run may retry.
+RESYNTHESIS_BATCH = 10
+
+
+def _uses_fallback(summary: str) -> bool:
+    return not summary or summary.startswith(FALLBACK_SUMMARY)
+
+
 async def _synthesize(
-    settings: Settings, message: GmailMessage, venue: Venue
+    settings: Settings,
+    message: GmailMessage,
+    venue: Venue,
+    attachments_text: str = "",
 ) -> tuple[ResponseSynthesis, str]:
-    fallback = "Response received; English synthesis is temporarily unavailable."
-    if not settings.inference_configured or not (message.body or message.subject):
-        return ResponseSynthesis(summary=fallback), "Responded"
+    """Ask Kimi for the English synthesis; fall back to a marker on failure."""
+    if not settings.inference_configured or not (
+        message.body or message.subject or attachments_text
+    ):
+        return ResponseSynthesis(summary=FALLBACK_SUMMARY), "Responded"
     try:
         synthesis = await asyncio.wait_for(
             DigitalOceanInferenceClient(settings).synthesize_response(
                 venue=venue.name,
                 subject=message.subject,
                 body=message.body,
+                attachments_text=attachments_text[:ATTACHMENT_TEXT_LIMIT],
             ),
             timeout=45,
         )
@@ -276,7 +293,7 @@ async def _synthesize(
         InvalidInferenceResponseError,
         ValueError,
     ):
-        return ResponseSynthesis(summary=fallback), "Responded"
+        return ResponseSynthesis(summary=FALLBACK_SUMMARY), "Responded"
 
 
 def _save_estimate(
@@ -298,21 +315,95 @@ def _save_estimate(
     session.add(estimate)
 
 
-def _fallback_summary(value: str) -> str:
-    """Create a compact display fallback without showing the whole response."""
-    useful_lines = []
-    for raw_line in value.splitlines():
-        line = raw_line.strip()
-        lowered = line.casefold()
-        if not line or line.startswith((">", "[cid:", "[logo-")):
+def _apply_facts(venue: Venue, synthesis: ResponseSynthesis) -> None:
+    """Record availability and capacity when the reply stated them."""
+    if synthesis.availability:
+        venue.availability = synthesis.availability[:500]
+    if synthesis.guest_capacity:
+        venue.guest_capacity = synthesis.guest_capacity[:100]
+
+
+def _stored_attachment_text(session, message_db_id: int) -> str:
+    texts = session.scalars(
+        select(Attachment.extracted_text).where(Attachment.message_id == message_db_id)
+    ).all()
+    return "\n\n".join(
+        text for text in texts if text and text != NO_EMBEDDED_TEXT
+    )
+
+
+async def _retry_fallback_summaries(
+    settings: Settings, *, limit: int = RESYNTHESIS_BATCH
+) -> int:
+    """Retry English synthesis for inbound messages stuck on the fallback text.
+
+    Runs at the end of every scheduled sync, replacing the old hand-run
+    ``app/resynthesize.py`` script. The message body (and any already-mirrored
+    attachment text) is reused from the database, so this never calls Gmail
+    again -- it only asks Kimi a second time in case the first attempt failed
+    transiently (a timeout, a rate limit, a brief outage). Bounded by
+    ``limit`` so one stretch of outage cannot make a single run unbounded.
+    """
+    with SessionLocal() as session:
+        candidate_ids = session.scalars(
+            select(Message.id)
+            .where(
+                Message.direction == "inbound",
+                or_(
+                    Message.synthesized_summary == "",
+                    Message.synthesized_summary.startswith(FALLBACK_SUMMARY),
+                ),
+            )
+            .order_by(Message.occurred_at)
+            .limit(limit)
+        ).all()
+
+    repaired = 0
+    for message_id in candidate_ids:
+        with SessionLocal() as session:
+            stored = session.get(Message, message_id)
+            if stored is None:
+                continue
+            venue = session.get(Venue, stored.venue_id)
+            if venue is None:
+                continue
+            venue_id = venue.id
+            gmail_message = GmailMessage(
+                message_id=stored.gmail_message_id,
+                thread_id=stored.gmail_thread_id,
+                sender="",
+                recipients="",
+                subject=stored.subject,
+                body=stored.body,
+                received_at=stored.occurred_at.isoformat(),
+            )
+            attachments_text = _stored_attachment_text(session, stored.id)
+
+        synthesis, status = await _synthesize(
+            settings, gmail_message, venue, attachments_text
+        )
+        if _uses_fallback(synthesis.summary):
             continue
-        if " ha scritto:" in lowered or lowered.startswith(("from:", "to:", "sent:")):
-            continue
-        useful_lines.append(line)
-    cleaned = " ".join(useful_lines)
-    sentences = re.split(r"(?<=[.!?])\s+", cleaned)
-    summary = " ".join(sentences[:2]).strip()
-    return (summary or "Response received; synthesis pending.")[:220]
+
+        with SessionLocal() as session:
+            stored = session.get(Message, message_id)
+            venue = session.get(Venue, venue_id)
+            if stored is None or venue is None:
+                continue
+            stored.synthesized_summary = synthesis.summary
+            latest_inbound_id = session.scalar(
+                select(Message.id)
+                .where(Message.venue_id == venue_id, Message.direction == "inbound")
+                .order_by(Message.occurred_at.desc())
+            )
+            if latest_inbound_id == stored.id:
+                venue.response_summary = synthesis.summary
+                venue.status = status
+                _apply_facts(venue, synthesis)
+            _save_estimate(session, venue_id, stored.gmail_message_id, synthesis)
+            session.commit()
+            repaired += 1
+    return repaired
 
 
 async def _reconcile_gmail_account(
@@ -406,14 +497,8 @@ async def _reconcile_gmail_account(
                     # reply previews and sends agree.
                     stored_message.sender_email = _sender_address(message)
                     session.commit()
-            if stored_message_id is None:
-                synthesis = ResponseSynthesis(summary="Message sent.")
-                status = ""
-                if incoming:
-                    with SessionLocal() as session:
-                        venue = session.get(Venue, venue_id)
-                        assert venue is not None
-                        synthesis, status = await _synthesize(settings, message, venue)
+            newly_stored = stored_message_id is None
+            if newly_stored:
                 with SessionLocal() as session:
                     venue = session.get(Venue, venue_id)
                     assert venue is not None
@@ -427,7 +512,7 @@ async def _reconcile_gmail_account(
                         sender_email="" if outgoing else _sender_address(message),
                         subject=message.subject,
                         body=message.body,
-                        synthesized_summary=synthesis.summary if incoming else "",
+                        synthesized_summary="",
                         occurred_at=_when(message.received_at),
                     )
                     session.add(stored_message)
@@ -457,15 +542,12 @@ async def _reconcile_gmail_account(
                         )
                         venue.status = "Responded to venue" if prior_inbound else "Sent"
                         sent += 1
-                    else:
-                        venue.status = status
-                        venue.response_summary = synthesis.summary
-                        _save_estimate(session, venue_id, message.message_id, synthesis)
-                        replies += 1
                     session.commit()
                     new_messages += 1
 
             assert stored_message_id is not None
+            # Mirror attachments before synthesizing so a PDF quote's text can
+            # feed the English summary and price estimate.
             result = await _mirror_message_attachments(
                 gmail=gmail,
                 storage=storage,
@@ -477,6 +559,26 @@ async def _reconcile_gmail_account(
             attachments_mirrored += result["mirrored"]
             attachments_skipped += result["skipped"]
             attachment_failures += result["failed"]
+
+            if newly_stored and incoming:
+                with SessionLocal() as session:
+                    venue = session.get(Venue, venue_id)
+                    assert venue is not None
+                    attachments_text = _stored_attachment_text(session, stored_message_id)
+                synthesis, status = await _synthesize(
+                    settings, message, venue, attachments_text
+                )
+                with SessionLocal() as session:
+                    venue = session.get(Venue, venue_id)
+                    stored_message = session.get(Message, stored_message_id)
+                    assert venue is not None and stored_message is not None
+                    stored_message.synthesized_summary = synthesis.summary
+                    venue.status = status
+                    venue.response_summary = synthesis.summary
+                    _apply_facts(venue, synthesis)
+                    _save_estimate(session, venue_id, message.message_id, synthesis)
+                    session.commit()
+                    replies += 1
         with SessionLocal() as session:
             venue = session.get(Venue, venue_id)
             assert venue is not None
@@ -562,6 +664,11 @@ async def _mirror_message_attachments(
                         ),
                         byte_size=stored.byte_size,
                         sha256=stored.sha256,
+                        extracted_text=attachment_text(
+                            gmail_attachment.filename,
+                            gmail_attachment.mime_type or "",
+                            data,
+                        ),
                     )
                 )
                 session.commit()
@@ -660,12 +767,17 @@ async def reconcile_gmail_database(
             }
         )
         account_states.append(state)
+    # Independent of mailbox sync: retries stuck placeholder summaries using
+    # bodies already stored locally, so it still runs even on a run where
+    # every mailbox failed.
+    summaries_repaired = await _retry_fallback_summaries(settings)
     completed_at = datetime.now(UTC)
     last_refreshed_at = iso_utc(completed_at) if synced_accounts else previous_refresh
     sync_status: dict[str, object] = {
         "completed_at": iso_utc(completed_at),
         "accounts": account_states,
         "failed_count": len(failed_accounts),
+        "summaries_repaired": summaries_repaired,
         **totals,
     }
     with SessionLocal() as session:
@@ -674,6 +786,7 @@ async def reconcile_gmail_database(
         set_system_state(session, SYNC_STATUS_KEY, json.dumps(sync_status))
     return {
         **totals,
+        "summaries_repaired": summaries_repaired,
         "accounts_synced": synced_accounts,
         "accounts_failed": failed_accounts,
         "last_refreshed_at": last_refreshed_at,
@@ -1007,41 +1120,3 @@ def update_preferences(*, budget_eur: float | None) -> dict[str, object]:
         if budget_eur is not None:
             set_system_state(session, BUDGET_KEY, str(round(float(budget_eur))))
         return preferences_payload(session)
-
-
-async def backfill_response_insights(settings: Settings) -> dict[str, int]:
-    """Re-run bounded English synthesis for existing latest replies."""
-    token = await get_google_access_token(settings)
-    gmail = GmailClient(token, settings.google_gmail_user_id)
-    updated = 0
-    with SessionLocal() as session:
-        venue_ids = session.scalars(select(Venue.id)).all()
-    for venue_id in venue_ids:
-        with SessionLocal() as session:
-            venue = session.get(Venue, venue_id)
-            latest = session.scalar(
-                select(Message)
-                .where(Message.venue_id == venue_id, Message.direction == "inbound")
-                .order_by(Message.occurred_at.desc())
-            )
-            if venue is None or latest is None:
-                continue
-            message_id = latest.gmail_message_id
-        message = await gmail.get_message(message_id)
-        synthesis, status = await _synthesize(settings, message, venue)
-        with SessionLocal() as session:
-            venue = session.get(Venue, venue_id)
-            latest = session.scalar(select(Message).where(Message.gmail_message_id == message_id))
-            assert venue is not None and latest is not None
-            fallback_used = synthesis.summary.startswith(
-                "Response received; English synthesis is temporarily unavailable."
-            )
-            if not fallback_used or not venue.response_summary:
-                venue.response_summary = synthesis.summary
-                latest.synthesized_summary = synthesis.summary
-            if not fallback_used:
-                venue.status = status
-            _save_estimate(session, venue_id, message_id, synthesis)
-            session.commit()
-            updated += 1
-    return {"updated": updated}

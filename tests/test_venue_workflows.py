@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app import database, db_workflow
 from app.config import Settings
 from app.database import (
+    Attachment,
     Base,
     GoogleAccount,
     Message,
@@ -17,7 +18,7 @@ from app.database import (
     Venue,
     venue_detail_payload,
 )
-from app.db_workflow import VenueConflictError, _is_outgoing
+from app.db_workflow import VenueConflictError, _is_outgoing, _stored_attachment_text
 from app.gmail import GmailMessage, GmailSendResult
 from app.google_auth import GoogleCredentialError
 
@@ -344,3 +345,43 @@ def test_preferences_store_the_budget(sessions) -> None:
     assert db_workflow.update_preferences(budget_eur=30_000)["budget_eur"] == 30_000.0
     with sessions() as session:
         assert database.preferences_payload(session)["guest_count"] == 90
+
+
+# ----- PDF quote text feeding the English synthesis --------------------------
+
+def test_stored_attachment_text_joins_pdfs_and_skips_the_no_text_marker(sessions) -> None:
+    venue_id = make_venue(sessions)
+    with sessions() as session:
+        message = Message(
+            venue_id=venue_id, gmail_message_id="in-1", gmail_thread_id="t1",
+            gmail_account_id=1, direction="inbound", occurred_at=NOW,
+        )
+        session.add(message)
+        session.commit()
+        message_id = message.id
+        session.add_all([
+            Attachment(
+                venue_id=venue_id, message_id=message_id, gmail_account_id=1,
+                gmail_message_id="in-1", gmail_attachment_id="a1", object_key="k1",
+                original_filename="listino.pdf", content_type="application/pdf",
+                byte_size=10, sha256="x", extracted_text="EUR 140 a persona.",
+            ),
+            Attachment(
+                venue_id=venue_id, message_id=message_id, gmail_account_id=1,
+                gmail_message_id="in-1", gmail_attachment_id="a2", object_key="k2",
+                original_filename="scan.pdf", content_type="application/pdf",
+                byte_size=10, sha256="y", extracted_text="[no embedded text]",
+            ),
+            Attachment(
+                venue_id=venue_id, message_id=message_id, gmail_account_id=1,
+                gmail_message_id="in-1", gmail_attachment_id="a3", object_key="k3",
+                original_filename="menu.png", content_type="image/png",
+                byte_size=10, sha256="z", extracted_text="",
+            ),
+        ])
+        session.commit()
+
+    with sessions() as session:
+        text = _stored_attachment_text(session, message_id)
+
+    assert text == "EUR 140 a persona."

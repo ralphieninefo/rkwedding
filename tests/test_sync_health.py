@@ -1,6 +1,7 @@
 """Tests for per-mailbox sync isolation and the visible sync-health record."""
 
 import json
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -14,6 +15,7 @@ from app.database import (
     SYNC_STATUS_KEY,
     Base,
     GoogleAccount,
+    Message,
     Venue,
     clear_sync_failure,
     dashboard_payload,
@@ -22,6 +24,7 @@ from app.database import (
     sync_status_payload,
 )
 from app.google_auth import GoogleCredentialError, get_google_access_token
+from app.models import ResponseSynthesis
 
 PERSONAL = {"id": 1, "email": "personal@example.com", "is_primary": False}
 SHARED = {"id": 2, "email": "shared@example.com", "is_primary": True}
@@ -431,3 +434,114 @@ def test_oauth_callback_clears_the_failure_for_that_mailbox(tmp_path, monkeypatc
         status = sync_status_payload(session)
     assert status["failed_count"] == 0
     assert status["accounts"][0]["status"] == "reconnected"
+
+
+# ----- automatic retry of stuck placeholder summaries -------------------------
+
+
+def _stuck_message(venue_id: int, **overrides) -> Message:
+    fields = {
+        "venue_id": venue_id,
+        "gmail_message_id": "in-1",
+        "gmail_thread_id": "t1",
+        "gmail_account_id": SHARED["id"],
+        "direction": "inbound",
+        "sender_email": "staff@villa.example",
+        "subject": "Re: Richiesta",
+        "body": "Siamo disponibili, il costo e' 140 euro a persona.",
+        "synthesized_summary": db_workflow.FALLBACK_SUMMARY,
+        "occurred_at": datetime.now(UTC),
+    }
+    fields.update(overrides)
+    return Message(**fields)
+
+
+@pytest.mark.anyio
+async def test_reconcile_retries_a_stuck_fallback_summary_and_updates_the_venue(
+    sessions, monkeypatch
+) -> None:
+    with sessions() as session:
+        venue = Venue(name="Villa Stuck", email="stuck@villa.example", status="Responded")
+        session.add(venue)
+        session.commit()
+        session.add(_stuck_message(venue.id))
+        session.commit()
+        venue_id = venue.id
+
+    async def fake_reconcile(_settings, _account_id, *, days):
+        return dict(COUNTS)
+
+    async def fake_synthesize(_settings, _message, _venue, _attachments_text=""):
+        return (
+            ResponseSynthesis(
+                summary="EUR 140 per person.",
+                status="quote_received",
+                guest_capacity="up to 120",
+            ),
+            "Quote received",
+        )
+
+    monkeypatch.setattr(db_workflow, "list_google_accounts", lambda: [SHARED])
+    monkeypatch.setattr(db_workflow, "_reconcile_gmail_account", fake_reconcile)
+    monkeypatch.setattr(db_workflow, "_synthesize", fake_synthesize)
+
+    result = await db_workflow.reconcile_gmail_database(Settings(_env_file=None), days=30)
+
+    assert result["summaries_repaired"] == 1
+    assert _stored_status(sessions)["summaries_repaired"] == 1
+    with sessions() as session:
+        stored = session.scalar(select(Message).where(Message.venue_id == venue_id))
+        assert stored.synthesized_summary == "EUR 140 per person."
+        venue = session.get(Venue, venue_id)
+        assert venue.status == "Quote received"
+        assert venue.guest_capacity == "up to 120"
+
+
+@pytest.mark.anyio
+async def test_retry_pass_is_bounded_and_skips_summaries_that_still_fail(
+    sessions, monkeypatch
+) -> None:
+    with sessions() as session:
+        venues = [
+            Venue(name=f"Villa {i}", email=f"villa{i}@example.com", status="Responded")
+            for i in range(3)
+        ]
+        session.add_all(venues)
+        session.commit()
+        for i, venue in enumerate(venues):
+            # Explicit, strictly increasing timestamps so retry order (oldest
+            # stuck message first) is deterministic rather than clock-timing.
+            session.add(_stuck_message(
+                venue.id,
+                gmail_message_id=f"in-{i}",
+                occurred_at=datetime(2026, 9, 3, 12, 0, i, tzinfo=UTC),
+            ))
+        session.commit()
+
+    attempted: list[str] = []
+
+    async def flaky_synthesize(_settings, message, _venue, _attachments_text=""):
+        attempted.append(message.message_id)
+        if message.message_id == "in-1":
+            return ResponseSynthesis(summary="Recovered."), "Responded"
+        return ResponseSynthesis(summary=db_workflow.FALLBACK_SUMMARY), "Responded"
+
+    monkeypatch.setattr(db_workflow, "_synthesize", flaky_synthesize)
+
+    repaired = await db_workflow._retry_fallback_summaries(
+        Settings(_env_file=None), limit=2
+    )
+
+    assert repaired == 1
+    assert len(attempted) == 2
+    with sessions() as session:
+        summaries = {
+            row.gmail_message_id: row.synthesized_summary
+            for row in session.scalars(select(Message)).all()
+        }
+    assert summaries["in-1"] == "Recovered."
+    # Still stuck: either genuinely retried and failed again, or never reached
+    # because of the batch limit -- either way it is untouched, not lost.
+    for message_id, summary in summaries.items():
+        if message_id != "in-1":
+            assert summary == db_workflow.FALLBACK_SUMMARY

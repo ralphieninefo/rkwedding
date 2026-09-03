@@ -88,6 +88,10 @@ erDiagram
         string location
         string email UK
         string status
+        string decision "'', shortlisted, or passed"
+        datetime visit_at "nullable planned visit"
+        string availability
+        string guest_capacity
         text response_summary
         text research_notes
     }
@@ -105,6 +109,8 @@ erDiagram
         int gmail_account_id FK
         string gmail_message_id UK
         string direction
+        string kind "inquiry, reply, reminder, or ''"
+        string sender_email "exact inbound reply-to address"
         text body
         text synthesized_summary
         datetime occurred_at
@@ -132,6 +138,7 @@ erDiagram
         string content_type
         int byte_size
         string sha256
+        text extracted_text "PDF text, or a no-text marker"
     }
 ```
 
@@ -139,7 +146,8 @@ Additional `SystemState` records hold small checkpoints: `gmail_last_refresh`
 (the last time at least one mailbox synchronized) and `gmail_sync_status`, a
 JSON record of the last scheduled run with one entry per connected mailbox
 (address, `ok`/`failed`, a short error sentence, last successful check, last
-attempted check). It contains no tokens, message bodies, or object keys.
+attempted check) plus a `summaries_repaired` count from that run's automatic
+retry pass. It contains no tokens, message bodies, or object keys.
 
 PostgreSQL is authoritative for the dashboard. Gmail remains authoritative for
 complete conversation history and the original emailed attachment. Spaces is a
@@ -197,16 +205,27 @@ sequenceDiagram
         Job->>DB: Create new message or load known message
         Job->>Gmail: Download unmirrored attachments
         Job->>Spaces: Store private object under venue/message prefix
-        Job->>DB: Store attachment metadata and checksum
-        Job->>Kimi: Inbound subject/body only
-        Kimi-->>Job: Validated English synthesis and estimate
-        Job->>DB: Store message, status, summary, estimate
+        Job->>Job: Extract embedded text from PDF quotes locally
+        Job->>DB: Store attachment metadata, checksum, and extracted text
+        Job->>Kimi: Inbound subject/body plus any extracted PDF text
+        Kimi-->>Job: Validated English synthesis, estimate, availability, capacity
+        Job->>DB: Store message, status, summary, estimate, facts
     end
+    Job->>DB: Retry a bounded batch of older replies still on the fallback summary
     Job->>DB: Store per-mailbox sync status; advance refresh time if any mailbox succeeded
     UI->>DB: GET /api/venues on load and every minute
 ```
 
 The dashboard does not need to trigger Gmail. It reads the last committed PostgreSQL state immediately. The maximum expected ingestion delay is the 15-minute scheduler interval plus processing time.
+
+Attachments are mirrored, and any embedded PDF text extracted, *before*
+synthesis runs for that message, so a quote sent only as a PDF still produces
+a priced English summary. The retry pass at the end of every run re-attempts
+Kimi for a small, bounded batch of inbound messages whose stored summary is
+still the generic fallback (from an earlier timeout, rate limit, or outage) --
+using the message body and attachment text already in PostgreSQL, so it never
+calls Gmail again. This replaces the old hand-run `app/resynthesize.py`
+script, which no longer exists.
 
 Mailboxes are reconciled independently. A revoked or expired refresh token,
 a Gmail HTTP error, or an unreachable Google endpoint on one account is
@@ -252,9 +271,9 @@ venues/{venue_id}/messages/{gmail_message_id}/attachments/
 The bucket is private. The database does not expose object keys through the
 venue API, and the browser never receives a long-lived Spaces credential.
 
-## 7. Follow-up replies
+## 7. Follow-up replies and reminders
 
-New outreach uses the configured primary shared account. A follow-up uses `gmail_account_id` from the inbound message so it stays in the account and thread that actually received the reply.
+New outreach uses the configured primary shared account. A follow-up uses `gmail_account_id` from the inbound message so it stays in the account and thread that actually received the reply. The preview and send steps always agree on the exact recipient, since both read the same stored inbound sender address.
 
 ```mermaid
 sequenceDiagram
@@ -272,8 +291,15 @@ sequenceDiagram
     UI->>API: POST reply
     API->>DB: Resolve owning Gmail account
     API->>Gmail: Send in original thread
-    API->>DB: Store outbound message and Replied status
+    API->>DB: Store outbound message and Responded-to-venue status
 ```
+
+A silent venue (about a week since the last outbound message, and no reply
+since) offers **Send reminder** instead of a normal follow-up. It previews and
+sends the same way, continuing the same thread and mailbox as the original
+inquiry, and is recorded as `kind="reminder"` rather than a reply. Either
+preview can be filled in by Kimi from a few English points (`draft_reply`);
+the draft is only ever shown for review, never sent automatically.
 
 ## 8. Authentication and credentials
 
@@ -306,7 +332,9 @@ sequenceDiagram
 
 ## 9. AI contract
 
-The application sends a bounded prompt containing venue name, message subject, and at most 6,000 characters of body text. The expected output is validated as:
+The application sends a bounded prompt containing venue name, message subject,
+at most 6,000 characters of body text, and at most 8,000 characters of text
+already extracted from PDF quote attachments. The expected output is validated as:
 
 ```json
 {
@@ -314,11 +342,20 @@ The application sends a bounded prompt containing venue name, message subject, a
   "status": "responded | quote_received | viewing_offered | unavailable | needs_reply",
   "estimated_total_min_eur": 0,
   "estimated_total_max_eur": 0,
-  "price_note": "Calculation basis or missing-cost note"
+  "price_note": "Calculation basis or missing-cost note, notes when a price came from an attachment",
+  "availability": "Short note on stated date availability, or ''",
+  "guest_capacity": "Stated capacity, e.g. 'up to 120 seated', or ''"
 }
 ```
 
-The model cannot call Gmail or write to PostgreSQL. Invalid, timed-out, or unavailable inference falls back to a non-destructive response marker; stored fallback records can be re-synthesized later.
+A second, separate contract turns the couple's English points into an Italian
+reply body (plain text, no structured fields); it is always shown in the reply
+editor and never sent without human confirmation.
+
+The model cannot call Gmail or write to PostgreSQL. Invalid, timed-out, or
+unavailable inference falls back to a non-destructive response marker. A
+bounded batch of fallback records is automatically retried on every scheduled
+sync (see Section 5); no manual script is required.
 
 ## 10. Reliability behavior
 
@@ -343,29 +380,28 @@ The model cannot call Gmail or write to PostgreSQL. Invalid, timed-out, or unava
 
 ### Active production path
 
-- FastAPI UI/API
+- FastAPI UI/API (home queue, venue dossier, all-venues comparison)
 - PostgreSQL workflow database
-- multi-account Google OAuth
+- multi-account Google OAuth, checked against every connected mailbox before a first send
 - Gmail API polling every 15 minutes
-- Kimi structured response synthesis
+- embedded PDF-quote text extraction feeding Kimi synthesis
+- Kimi structured response synthesis, availability/capacity extraction, and Italian reply drafting
+- automatic retry of fallback summaries on every scheduled run
 - private Spaces attachment mirroring and signed viewing
 
 ### Present but not central to production
 
 - older event/webhook routes in `app/main.py`;
 - deterministic comparison prototype at `/analysis`;
-- PDF text extraction helper (not required for viewing);
 - Google Pub/Sub handlers.
 
 These remain for compatibility or future work, but scheduled database reconciliation is the current production ingestion architecture.
 
 ## 12. Next architectural increments
 
-1. Guard first inquiries against conversations that already exist in any
-   connected mailbox or in stored messages, and widen the historical search
-   window for venue/mailbox pairs with no stored history.
-2. Add attachment-failure history beside the per-mailbox sync status.
-3. Optionally feed embedded PDF text into the validated synthesis contract;
-   leave image OCR as an explicit, on-demand operation.
-4. Add shortlist and visit entities only after quote coverage is reliable.
-5. Replace ad hoc schema additions with a formal migration tool if the data model grows materially.
+1. Add attachment-failure history beside the per-mailbox sync status.
+2. Extract structured line-item terms (deposit, inclusions, payment schedule)
+   from PDF quotes, beyond the current price/availability/capacity fields.
+3. Remove or quarantine the pre-PostgreSQL Sheet/Pub/Sub/agent prototype code
+   once nothing depends on it (see the product brief's improvement priorities).
+4. Replace ad hoc schema additions with a formal migration tool if the data model grows materially.

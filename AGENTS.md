@@ -30,11 +30,13 @@ The canonical production path is:
 - `app/main.py`: authenticated HTTP/UI boundary
 - `app/database.py`: durable models and UI projections
 - `app/db_workflow.py`: database-backed outreach, reconciliation, and replies
+- `app/venue_state.py`: pure stage/next-action derivation, no DB access
 - `app/email_templates.py`: exact human-reviewed outbound copy
 - `app/gmail_oauth.py`, `app/gmail.py`: multi-account OAuth and Gmail API
 - `app/scheduled_sync.py`: 15-minute production reconciliation entry point
 - `app/storage.py`: private Spaces attachment mirror
-- `app/inference.py`: bounded Kimi response synthesis
+- `app/documents.py`: embedded PDF-quote text extraction feeding synthesis
+- `app/inference.py`: bounded Kimi response synthesis and reply drafting
 - `app/discovery.py`: public venue website discovery
 
 Older Sheet-first or experimental analysis paths—including `app/workflow.py`,

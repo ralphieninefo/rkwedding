@@ -36,22 +36,29 @@ agent platform, a CRM product, or a multi-tenant application.
 
 ### Product surfaces
 
-- **Dashboard:** the active correspondence list. It shows compact, actionable
-  Gmail-derived state—who was contacted, the latest brief English summary, the
-  current step, and controls to preview/reply or open the correct Gmail thread.
-- **Venues:** the durable reference directory. Each venue shows its accumulated
-  summary, contact/research details, pricing and capacity, correspondence
-  provenance, and mirrored assets with **View** and **Open in Gmail** actions.
+- **Home:** a next-action queue, grouped into plain-language stages (reply
+  needed, waiting on venue, not contacted yet, shortlist, closed). Each card
+  shows the venue, region, a one-line summary, price when known, days since
+  the last activity, and a single primary action. Setup (Gmail accounts, sync
+  health, budget) lives in a Settings corner, out of the way until something
+  needs attention.
+- **Venue dossier** (`/venues/{id}`): the durable per-venue record. A
+  conversation timeline (mailbox, direction, date, one-line summary per
+  message), facts (price, capacity, availability), documents, notes, and
+  shortlist/pass/edit/visit-date controls.
+- **All venues** (`/venues`): a compact list that opens the dossier, plus a
+  shortlist-vs-budget comparison table.
 
-Both surfaces are database-backed views of the same records. Neither reads from
-Google Sheets, and neither needs a live Gmail request in order to render.
+All three surfaces are database-backed views of the same records. None reads
+from Google Sheets, and none needs a live Gmail request in order to render.
 
-### 1. Open the dashboard
+### 1. Open the home screen
 
 The user signs into the control center and immediately sees the last committed
-PostgreSQL state. Venue data remains visible through deploys, worker failures,
-and temporary Gmail or model outages. The page may poll the app API for newer
-database state, but opening it must not call Gmail or require **Check Gmail**.
+PostgreSQL state as a next-action queue. Venue data remains visible through
+deploys, worker failures, and temporary Gmail or model outages. The page may
+poll the app API for newer database state, but opening it must not call Gmail
+or require **Check Gmail**.
 
 ### 2. Add and contact a venue
 
@@ -75,44 +82,62 @@ Every 15 minutes, the scheduled App Platform job:
 2. searches known venue addresses and tracked Gmail threads;
 3. stores unseen inbound and outbound messages idempotently;
 4. follows a known thread when venue staff reply from a different address;
-5. mirrors new attachments into the private Spaces bucket;
-6. asks Kimi for a concise English synthesis and structured price data;
-7. validates and stores derived data in PostgreSQL; and
-8. commits the successful refresh time.
+5. mirrors new attachments into the private Spaces bucket, extracting embedded
+   text from PDF quotes before synthesis runs;
+6. asks Kimi for a concise English synthesis, structured price data, and any
+   stated availability or guest capacity, using the email body plus any PDF
+   quote text found in step 5;
+7. validates and stores derived data in PostgreSQL;
+8. retries a small, bounded batch of older replies whose synthesis previously
+   failed transiently, without calling Gmail again; and
+9. commits the successful refresh time.
 
 The UI reads the resulting database state. A new reply may take about 15 minutes
 to appear; manual sync is a recovery/diagnostic action, not the normal workflow.
 
 ### 4. Review a response
 
-The dashboard emphasizes decision data rather than the complete raw message:
+The dossier emphasizes decision data rather than the complete raw message:
 
 - venue name and region;
 - date added and first inquiry date;
 - latest response time;
 - concise English synthesis;
-- workflow status;
+- workflow status, stated availability, and stated guest capacity;
 - estimated total price for 90 guests when supported by the response; and
 - a clear next action.
 
 The user can open the original thread in the correct Gmail account. The venue
-detail page includes contact and research metadata plus a **Documents** section.
+dossier includes contact and research metadata plus a **Documents** section.
 **View** opens a short-lived link to the private Spaces mirror; **Open in Gmail**
 opens the authoritative source message.
 
-### 5. Follow up
+### 5. Decide and plan
 
-1. Click **Review & reply** on a venue that has responded.
+From the dossier the user can mark a venue **shortlisted** or **passed**, record
+a planned visit date, and edit any field discovered or quoted incorrectly.
+Shortlisted venues appear in the All Venues comparison against the couple's
+budget. A decision is a plain field on the venue record; it never overrides or
+hides the underlying Gmail correspondence.
+
+### 6. Follow up, or chase a silent venue
+
+1. Click **Reply** on a venue that has responded, optionally asking Kimi to
+   draft the reply in Italian from a few English points first.
 2. See the response synthesis, recipient, subject, and proposed reply.
 3. Edit the reply freely.
 4. Explicitly confirm sending.
 5. Send through the account and thread attached to the latest inbound message.
 6. Store the outbound message and update the venue's status.
 
+When a venue has not replied for about a week, the home screen offers a
+**Send reminder** action instead. The reminder previews and sends the same way,
+continuing the original Gmail thread and mailbox rather than starting a new one.
+
 The application may prepare text but must not autonomously send, accept a quote,
 book a viewing, sign a contract, or pay a deposit.
 
-### 6. Add external research
+### 7. Add external research
 
 Human research from Reddit, calls, referrals, or other sources belongs in a
 clearly labeled research section with source type, source URL, contact, notes,
@@ -175,18 +200,26 @@ safe reprocessing of the same Gmail data.
 
 ## Improvement priorities
 
-Work in this order and keep each change independently testable:
+Work in this order and keep each change independently testable. Items 1–4 are
+done; they stay listed so the next change is judged against the same order:
 
-1. **Operational clarity:** visible last successful sync, account ownership,
-   worker/attachment failures, and an owner-only retry action.
-2. **Conversation correctness:** robustly link historical and alternate-sender
-   replies to the right venue, mailbox, and Gmail thread.
-3. **Decision workflow:** explicit next-action and shortlist states, comparison
-   of price/capacity/location, and visit planning.
-4. **Document usability:** clear attachment metadata and safe backfill status;
-   optionally extract embedded PDF text, while leaving scanned PDFs for review.
-5. **Legacy cleanup:** remove or quarantine unused Sheet-first agent/analysis code
-   after verifying no production route or test depends on it.
+1. **Operational clarity (done):** visible last successful sync, account
+   ownership, per-mailbox failure isolation, and self-clearing reconnect state.
+2. **Conversation correctness (done):** historical and alternate-sender replies
+   link to the right venue, mailbox, and Gmail thread; a first inquiry checks
+   every connected mailbox, not only the sender, before sending.
+3. **Decision workflow (done):** a next-action home queue, explicit
+   shortlist/pass/visit state, a reminder workflow for silent venues, and a
+   shortlist-vs-budget comparison.
+4. **Document usability (done):** attachment metadata, safe backfill, and
+   embedded PDF-quote text feeding the English synthesis; scanned PDFs are
+   still left for human review, not OCR'd.
+5. **Operational visibility:** surface attachment-failure history beside the
+   existing mailbox sync health.
+6. **Legacy cleanup:** remove or quarantine unused Sheet-first agent/analysis
+   code (`app/workflow.py`, `app/sheets.py`, `app/agent.py`, the `/events/*`
+   and `/api/gmail/sync` routes, and related modules) after verifying no
+   production route or test depends on it.
 
 Do not add more infrastructure until a demonstrated product need cannot be met
 by the existing FastAPI service, scheduled job, PostgreSQL database, private
