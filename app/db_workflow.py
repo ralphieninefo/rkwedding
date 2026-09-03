@@ -1,33 +1,50 @@
 """Gmail reconciliation and concise database-backed response synthesis."""
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from email.utils import getaddresses, parseaddr
 import re
 
 import httpx
 from botocore.exceptions import BotoCoreError, ClientError
+from google.auth.exceptions import GoogleAuthError
 from sqlalchemy import select
 
 from app.config import Settings
 from app.database import (
+    LAST_REFRESH_KEY,
+    SYNC_STATUS_KEY,
     Attachment,
     Message,
     Outreach,
     PriceEstimate,
     SessionLocal,
     Venue,
+    get_system_state,
     iso_utc,
     set_system_state,
+    sync_status_payload,
     upsert_venue,
 )
 from app.email_templates import FOLLOWUP_BODY, OUTREACH_BODY, OUTREACH_SUBJECT
 from app.gmail import GmailClient, GmailMessage
 from app.gmail_oauth import default_google_account_id, list_google_accounts
-from app.google_auth import get_google_access_token
+from app.google_auth import GoogleCredentialError, get_google_access_token
 from app.inference import DigitalOceanInferenceClient, InvalidInferenceResponseError
 from app.models import ResponseSynthesis
 from app.storage import AttachmentTooLargeError, SpacesStorage
+
+# Failures that affect one mailbox only. They are recorded per account so a
+# revoked token or a Gmail outage on one mailbox never blocks the other.
+ACCOUNT_SYNC_ERRORS = (
+    GoogleCredentialError,
+    GoogleAuthError,
+    httpx.HTTPError,
+    ValueError,
+    OSError,
+    KeyError,
+)
 
 
 def _addresses(value: str) -> set[str]:
@@ -444,10 +461,38 @@ async def _mirror_message_attachments(
     return counts
 
 
+def sync_error_message(exc: BaseException) -> str:
+    """Describe one mailbox failure for the dashboard without leaking data."""
+    if isinstance(exc, GoogleCredentialError):
+        return str(exc)
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        if status_code in {401, 403}:
+            return (
+                f"Gmail refused access (HTTP {status_code}). Reconnect this "
+                "mailbox if it keeps happening."
+            )
+        if status_code == 429:
+            return "Gmail is rate limiting this mailbox; the next run will retry."
+        return f"Gmail returned HTTP {status_code}; the next run will retry."
+    if isinstance(exc, httpx.HTTPError):
+        return "Gmail could not be reached; the next run will retry."
+    if isinstance(exc, GoogleAuthError):
+        return "Google could not refresh the sign-in; the next run will retry."
+    return f"{type(exc).__name__} while checking this mailbox; the next run will retry."
+
+
 async def reconcile_gmail_database(
     settings: Settings, *, days: int = 365
 ) -> dict[str, object]:
-    """Reconcile every connected Gmail account into one shared dashboard."""
+    """Reconcile every connected Gmail account into one shared dashboard.
+
+    Each mailbox is reconciled independently. A failure on one account is
+    recorded in ``gmail_sync_status`` and the remaining accounts still run, so
+    an expired token on the personal mailbox cannot hide replies arriving in
+    the shared wedding mailbox. ``gmail_last_refresh`` advances whenever at
+    least one mailbox synchronized successfully.
+    """
     accounts = list_google_accounts()
     if not accounts:
         raise FileNotFoundError("No Google OAuth credential is stored in the database.")
@@ -459,21 +504,65 @@ async def reconcile_gmail_database(
         "attachments_skipped": 0,
         "attachment_failures": 0,
     }
+    with SessionLocal() as session:
+        previous = sync_status_payload(session) or {}
+        previous_refresh = get_system_state(session, LAST_REFRESH_KEY)
+    previous_accounts = {
+        str(item["email"]): item for item in previous.get("accounts", [])
+    }
     synced_accounts: list[str] = []
+    failed_accounts: list[dict[str, str]] = []
+    account_states: list[dict[str, object]] = []
     for account in accounts:
-        result = await _reconcile_gmail_account(
-            settings, int(account["id"]), days=days
-        )
+        email = str(account["email"])
+        checked_at = iso_utc(datetime.now(UTC))
+        state: dict[str, object] = {
+            "email": email,
+            "is_primary": bool(account.get("is_primary")),
+            "last_checked_at": checked_at,
+            "last_success_at": previous_accounts.get(email, {}).get("last_success_at"),
+        }
+        try:
+            result = await _reconcile_gmail_account(
+                settings, int(account["id"]), days=days
+            )
+        except ACCOUNT_SYNC_ERRORS as exc:
+            error = sync_error_message(exc)
+            failed_accounts.append({"email": email, "error": error})
+            state.update({"status": "failed", "error": error})
+            account_states.append(state)
+            continue
         for key in totals:
             totals[key] += int(result[key])
-        synced_accounts.append(str(account["email"]))
-    refreshed_at = datetime.now(UTC)
+        synced_accounts.append(email)
+        state.update(
+            {
+                "status": "ok",
+                "error": None,
+                "last_success_at": iso_utc(datetime.now(UTC)),
+                "new_messages": int(result["new_messages"]),
+                "attachment_failures": int(result["attachment_failures"]),
+            }
+        )
+        account_states.append(state)
+    completed_at = datetime.now(UTC)
+    last_refreshed_at = iso_utc(completed_at) if synced_accounts else previous_refresh
+    sync_status: dict[str, object] = {
+        "completed_at": iso_utc(completed_at),
+        "accounts": account_states,
+        "failed_count": len(failed_accounts),
+        **totals,
+    }
     with SessionLocal() as session:
-        set_system_state(session, "gmail_last_refresh", iso_utc(refreshed_at))
+        if synced_accounts:
+            set_system_state(session, LAST_REFRESH_KEY, iso_utc(completed_at))
+        set_system_state(session, SYNC_STATUS_KEY, json.dumps(sync_status))
     return {
         **totals,
         "accounts_synced": synced_accounts,
-        "last_refreshed_at": iso_utc(refreshed_at),
+        "accounts_failed": failed_accounts,
+        "last_refreshed_at": last_refreshed_at,
+        "sync_status": sync_status,
     }
 
 

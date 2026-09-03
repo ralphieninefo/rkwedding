@@ -1,12 +1,11 @@
 """Small signed-cookie authentication for the private control center."""
 
 import base64
-from datetime import UTC, datetime, timedelta
 import hashlib
 import hmac
+from datetime import UTC, datetime, timedelta
 
 from pydantic import SecretStr
-
 
 SESSION_COOKIE = "rkwedding_session"
 
@@ -27,7 +26,7 @@ def create_session_cookie(
     username: str, password: SecretStr, *, ttl_hours: int
 ) -> str:
     expires = datetime.now(UTC) + timedelta(hours=ttl_hours)
-    payload = _encode(f"{username}|{int(expires.timestamp())}".encode("utf-8"))
+    payload = _encode(f"{username}|{int(expires.timestamp())}".encode())
     return f"{payload}.{_signature(payload, password)}"
 
 

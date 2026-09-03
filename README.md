@@ -10,7 +10,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-245843?style=flat-square)
 ![DigitalOcean](https://img.shields.io/badge/DigitalOcean-App_Platform-0069ff?style=flat-square)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-managed-336791?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-61_passing-dfe9df?style=flat-square&labelColor=245843)
+![Tests](https://img.shields.io/badge/tests-82_passing-dfe9df?style=flat-square&labelColor=245843)
 
 </div>
 
@@ -83,6 +83,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for data ownership, sequence di
 - A new Gmail account can be connected only when its address is present in `GOOGLE_ALLOWED_EMAILS`.
 - Refreshable OAuth credentials are stored in PostgreSQL and survive deployments.
 - The scheduled worker checks all connected accounts every 15 minutes.
+- Each mailbox is checked independently. If one account's authorization expires or Gmail rejects it, the other account still synchronizes, the dashboard names the mailbox that needs reconnecting, and "Send" explains the reconnect step instead of failing generically.
 - Duplicate Gmail message IDs are ignored, making reconciliation safe to rerun.
 - Sending always requires an explicit human click; the sync worker never sends email.
 
@@ -197,7 +198,9 @@ Runtime secrets are configured as encrypted App Platform variables. Blank secret
 
 ## Near-term roadmap
 
-1. Add visible sync health and attachment-failure diagnostics without
-   reintroducing a manual check requirement.
-2. Optionally extract embedded PDF text for quote synthesis; keep OCR on demand.
-3. Add shortlist and visit-planning views once quote data is sufficiently complete.
+1. Check every connected mailbox (and stored messages) before a first inquiry so
+   a venue already contacted from the personal mailbox is never e-mailed twice.
+2. Show attachment-failure diagnostics beside the mailbox sync health that the
+   dashboard already displays.
+3. Optionally extract embedded PDF text for quote synthesis; keep OCR on demand.
+4. Add shortlist and visit-planning views once quote data is sufficiently complete.

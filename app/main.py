@@ -9,11 +9,13 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from google.auth.exceptions import GoogleAuthError
 from pydantic import SecretStr
 from starlette.concurrency import run_in_threadpool
 
 from app.agent import analyze_event
 from app.config import get_settings
+from app.google_auth import GoogleCredentialError
 from app.inference import InvalidInferenceResponseError
 from app.models import (
     AgentDecision,
@@ -39,6 +41,9 @@ from app.session_auth import (
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+GOOGLE_TRANSIENT_DETAIL = (
+    "Google could not refresh the Gmail sign-in just now. Please try again."
+)
 
 
 @asynccontextmanager
@@ -323,6 +328,10 @@ async def create_venue(venue: VenueCreate) -> dict[str, object]:
         return await create_venue_and_optionally_send(
             get_settings(), **venue.model_dump()
         )
+    except GoogleCredentialError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except GoogleAuthError as exc:
+        raise HTTPException(status_code=502, detail=GOOGLE_TRANSIENT_DETAIL) from exc
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="Connect Google before sending.") from exc
     except httpx.HTTPError as exc:
@@ -336,6 +345,10 @@ async def send_venue(venue_id: int) -> dict[str, object]:
 
     try:
         return await send_venue_inquiry(get_settings(), venue_id)
+    except GoogleCredentialError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except GoogleAuthError as exc:
+        raise HTTPException(status_code=502, detail=GOOGLE_TRANSIENT_DETAIL) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -384,6 +397,10 @@ async def reply_to_venue(venue_id: int, reply: VenueReply) -> dict[str, object]:
 
     try:
         return await send_reply(get_settings(), venue_id, reply.body)
+    except GoogleCredentialError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except GoogleAuthError as exc:
+        raise HTTPException(status_code=502, detail=GOOGLE_TRANSIENT_DETAIL) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -455,7 +472,7 @@ async def sync_control_center() -> dict[str, object]:
     from app.db_workflow import reconcile_gmail_database
 
     try:
-        return await reconcile_gmail_database(get_settings())
+        result = await reconcile_gmail_database(get_settings())
     except HttpError as exc:
         if exc.resp.status == 403:
             detail = "Gmail API is unavailable or not enabled."
@@ -468,6 +485,22 @@ async def sync_control_center() -> dict[str, object]:
         raise HTTPException(
             status_code=502, detail="Could not reconcile Gmail."
         ) from exc
+    _raise_if_no_mailbox_synced(result, status_code=502)
+    return result
+
+
+def _raise_if_no_mailbox_synced(result: dict[str, object], *, status_code: int) -> None:
+    """Keep manual reconciliation honest: no mailbox checked is not a success."""
+    failed = list(result.get("accounts_failed") or [])
+    if failed and not result.get("accounts_synced"):
+        problems = "; ".join(
+            f"{item.get('email', 'mailbox')}: {item.get('error', 'not checked')}"
+            for item in failed
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"No mailbox could be checked. {problems}",
+        )
 
 
 @app.post("/events/reconcile")
@@ -486,12 +519,14 @@ async def scheduled_reconciliation(
     try:
         from app.db_workflow import reconcile_gmail_database
 
-        return await reconcile_gmail_database(settings)
+        result = await reconcile_gmail_database(settings)
     except (httpx.HTTPError, ValueError, KeyError) as exc:
         raise HTTPException(
             status_code=503,
             detail="Reconciliation failed and will be retried by the scheduler.",
         ) from exc
+    _raise_if_no_mailbox_synced(result, status_code=503)
+    return result
 
 
 @app.get("/health")

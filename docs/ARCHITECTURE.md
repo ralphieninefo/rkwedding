@@ -1,6 +1,6 @@
 # Wedding Venue Control Center Architecture
 
-Current production architecture as of September 1, 2026.
+Current production architecture as of September 3, 2026.
 
 ## 1. System intent
 
@@ -135,7 +135,11 @@ erDiagram
     }
 ```
 
-Additional `SystemState` records hold small checkpoints such as the latest successful Gmail refresh.
+Additional `SystemState` records hold small checkpoints: `gmail_last_refresh`
+(the last time at least one mailbox synchronized) and `gmail_sync_status`, a
+JSON record of the last scheduled run with one entry per connected mailbox
+(address, `ok`/`failed`, a short error sentence, last successful check, last
+attempted check). It contains no tokens, message bodies, or object keys.
 
 PostgreSQL is authoritative for the dashboard. Gmail remains authoritative for
 complete conversation history and the original emailed attachment. Spaces is a
@@ -187,9 +191,9 @@ sequenceDiagram
 
     Cron->>Job: Start every 15 minutes
     Job->>DB: Load connected Google accounts and venues
-    loop Each connected Gmail account
-        Job->>Gmail: Search tracked addresses and known threads
-        Gmail-->>Job: Normalized messages
+    loop Each connected Gmail account (independently)
+        Job->>Gmail: Refresh token, search tracked addresses and known threads
+        Gmail-->>Job: Normalized messages (or a per-mailbox failure)
         Job->>DB: Create new message or load known message
         Job->>Gmail: Download unmirrored attachments
         Job->>Spaces: Store private object under venue/message prefix
@@ -198,11 +202,22 @@ sequenceDiagram
         Kimi-->>Job: Validated English synthesis and estimate
         Job->>DB: Store message, status, summary, estimate
     end
-    Job->>DB: Store successful refresh timestamp
+    Job->>DB: Store per-mailbox sync status; advance refresh time if any mailbox succeeded
     UI->>DB: GET /api/venues on load and every minute
 ```
 
 The dashboard does not need to trigger Gmail. It reads the last committed PostgreSQL state immediately. The maximum expected ingestion delay is the 15-minute scheduler interval plus processing time.
+
+Mailboxes are reconciled independently. A revoked or expired refresh token,
+a Gmail HTTP error, or an unreachable Google endpoint on one account is
+recorded for that account only; the other account still synchronizes in the
+same run. The dashboard reads `gmail_sync_status` and shows which mailbox needs
+reconnecting (via **Add Gmail account**), while "Last automatic update" keeps
+reflecting the most recent successful synchronization. Completing the OAuth
+callback for that mailbox marks its entry `reconnected` immediately, so the
+warning disappears before the next run confirms it. The job process exits
+non-zero only when no mailbox could be checked at all, and the manual
+`/api/control-center/sync` route answers 502 in that same situation.
 
 Attachment mirroring is deliberately separate from new-message creation. The
 worker revisits attachment references on known messages, allowing the first
@@ -313,6 +328,12 @@ The model cannot call Gmail or write to PostgreSQL. Invalid, timed-out, or unava
 - `/health` is the App Platform service probe.
 - A failed inference does not lose the underlying email body.
 - A failed scheduled run leaves the last successful database snapshot available to the UI.
+- A failure on one connected mailbox (expired or revoked token, Gmail error)
+  never blocks the other mailbox; the outcome per mailbox is stored in
+  `gmail_sync_status` and displayed on the dashboard.
+- Refresh-token failures surface as `GoogleCredentialError`, so "Send inquiry"
+  and "Send reply" return HTTP 401 with the mailbox to reconnect rather than a
+  generic server error. Google's raw error text is never shown or stored.
 - Gmail attachment source IDs and deterministic object keys prevent duplicate
   storage when the worker revisits a message.
 - A failed attachment upload is counted without discarding the synchronized
@@ -340,8 +361,11 @@ These remain for compatibility or future work, but scheduled database reconcilia
 
 ## 12. Next architectural increments
 
-1. Add an operator-visible scheduled-sync and attachment-failure history.
-2. Optionally feed embedded PDF text into the validated synthesis contract;
+1. Guard first inquiries against conversations that already exist in any
+   connected mailbox or in stored messages, and widen the historical search
+   window for venue/mailbox pairs with no stored history.
+2. Add attachment-failure history beside the per-mailbox sync status.
+3. Optionally feed embedded PDF text into the validated synthesis contract;
    leave image OCR as an explicit, on-demand operation.
-3. Add shortlist and visit entities only after quote coverage is reliable.
-4. Replace ad hoc schema additions with a formal migration tool if the data model grows materially.
+4. Add shortlist and visit entities only after quote coverage is reliable.
+5. Replace ad hoc schema additions with a formal migration tool if the data model grows materially.

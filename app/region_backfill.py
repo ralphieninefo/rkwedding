@@ -33,7 +33,7 @@ async def backfill_missing_regions() -> dict[str, int]:
         inspected += 1
         try:
             details = await discover_venue(website)
-        except Exception:  # A venue site failure must not abort the whole repair.
+        except Exception:  # noqa: BLE001, S112 - one bad venue site must not abort the repair.
             continue
         region = (details.region or details.location).strip()
         if not region:

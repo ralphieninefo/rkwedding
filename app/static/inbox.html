@@ -71,6 +71,12 @@
         <p>Add the downloaded OAuth client file at <code>data/google_client_secret.json</code>. Then refresh and connect Google. The app requests Gmail read/send access.</p>
       </section>
 
+      <section class="setup-panel sync-panel" id="syncPanel" hidden role="status" aria-live="polite">
+        <strong id="syncPanelTitle">A Gmail account needs attention.</strong>
+        <ul class="sync-problems" id="syncProblems"></ul>
+        <p id="syncPanelHint">Automatic updates keep running for the other mailbox. Use <em>Add Gmail account</em> and choose the mailbox listed above to reconnect it.</p>
+      </section>
+
       <section class="summary-grid" aria-label="Response summary">
         <article class="brief-card"><span class="brief-label">Venues</span><strong id="trackedCount">0</strong><span>saved in the app</span></article>
         <article class="brief-card"><span class="brief-label">Last automatic update</span><strong class="summary-text" id="lastCheck">Not yet</strong><span id="lastCheckDetail">Gmail updates every 15 minutes</span></article>
@@ -144,6 +150,6 @@
       <span>Control center · Private app database</span>
       <a href="/venues">Full venue directory ↗</a>
     </footer>
-    <script src="/static/inbox.js?v=20260903-3" defer></script>
+    <script src="/static/inbox.js?v=20260903-4" defer></script>
   </body>
 </html>

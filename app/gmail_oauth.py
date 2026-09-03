@@ -1,4 +1,4 @@
-"""Local read-only Google OAuth flow for the Gmail tracker."""
+"""Multi-account Google OAuth flow with database-backed Gmail credentials."""
 
 import json
 import os
@@ -6,7 +6,7 @@ import secrets
 from pathlib import Path
 
 import httpx
-from google.auth.exceptions import GoogleAuthError
+from google.auth.exceptions import GoogleAuthError, RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -18,9 +18,11 @@ from app.database import (
     Message,
     Outreach,
     SessionLocal,
+    clear_sync_failure,
     get_system_state,
     set_system_state,
 )
+from app.google_auth import GoogleCredentialError
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 CLIENT_SECRET_PATH = DATA_DIR / "google_client_secret.json"
@@ -247,6 +249,9 @@ def finish_authorization(
         else:
             account.token_json = token_json
         session.commit()
+        # A fresh authorization supersedes any recorded sync failure for this
+        # mailbox; the next scheduled run confirms it.
+        clear_sync_failure(session, email)
         return {
             "id": account.id,
             "email": account.email,
@@ -254,8 +259,22 @@ def finish_authorization(
         }
 
 
+def account_email(account_id: int | None) -> str | None:
+    """Return the mailbox address for a stored account, if it still exists."""
+    if account_id is None:
+        return None
+    with SessionLocal() as session:
+        account = session.get(GoogleAccount, account_id)
+        return account.email if account is not None else None
+
+
 def load_credentials(account_id: int | None = None) -> Credentials:
-    """Load and refresh the database-backed Gmail credential."""
+    """Load and refresh the database-backed Gmail credential.
+
+    Raises ``GoogleCredentialError`` when Google rejects the stored refresh
+    token (expired, revoked, or the OAuth client changed); the owner must
+    reconnect that mailbox from the dashboard.
+    """
     stored = _stored_token(account_id)
     if stored is None:
         raise FileNotFoundError("No Google OAuth credential is stored in the database.")
@@ -264,11 +283,14 @@ def load_credentials(account_id: int | None = None) -> Credentials:
         json.loads(token_json), SCOPES
     )
     if credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
+        try:
+            credentials.refresh(Request())
+        except RefreshError as exc:
+            raise GoogleCredentialError(account_email(stored_account_id)) from exc
         _store_token(credentials.to_json(), stored_account_id)
     elif stored_account_id is None:
         # Preserve any refresh performed while identifying a legacy account.
         _store_token(credentials.to_json(), None)
     if not credentials.valid:
-        raise ValueError("Google authorization is no longer valid.")
+        raise GoogleCredentialError(account_email(stored_account_id))
     return credentials

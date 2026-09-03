@@ -6,9 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from google.auth.exceptions import TransportError
 from pydantic import SecretStr
 
 from app.config import Settings
+from app.google_auth import GoogleCredentialError
 from app.main import app
 
 client = TestClient(app)
@@ -127,6 +129,71 @@ def test_saved_draft_can_be_sent(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"id": 13, "status": "Sent", "sent": True}
+
+
+@pytest.mark.parametrize(
+    ("path", "target"),
+    [
+        ("/api/venues/13/send", "app.db_workflow.send_venue_inquiry"),
+        ("/api/venues/13/reply", "app.db_workflow.reply_to_venue"),
+    ],
+)
+def test_expired_google_authorization_asks_to_reconnect_instead_of_500(
+    monkeypatch, path: str, target: str
+) -> None:
+    async def expired(*_args, **_kwargs):
+        raise GoogleCredentialError("shared@example.com")
+
+    monkeypatch.setattr(target, expired)
+
+    response = client.post(path, json={"body": "Grazie."})
+
+    assert response.status_code == 401
+    assert "shared@example.com" in response.json()["detail"]
+    assert "Add Gmail account" in response.json()["detail"]
+
+
+def test_transient_google_refresh_failure_is_a_retryable_502(monkeypatch) -> None:
+    async def flaky(*_args, **_kwargs):
+        raise TransportError("connection reset")
+
+    monkeypatch.setattr("app.db_workflow.send_venue_inquiry", flaky)
+
+    response = client.post("/api/venues/13/send")
+
+    assert response.status_code == 502
+    assert "try again" in response.json()["detail"].casefold()
+    assert "connection reset" not in response.json()["detail"]
+
+
+def test_manual_sync_is_not_a_success_when_no_mailbox_could_be_checked(
+    monkeypatch,
+) -> None:
+    async def nothing_synced(_settings):
+        return {
+            "new_messages": 0,
+            "accounts_synced": [],
+            "accounts_failed": [{"email": "shared@example.com", "error": "Reconnect it."}],
+            "last_refreshed_at": None,
+        }
+
+    async def partially_synced(_settings):
+        return {
+            "new_messages": 1,
+            "accounts_synced": ["shared@example.com"],
+            "accounts_failed": [{"email": "personal@example.com", "error": "Expired."}],
+            "last_refreshed_at": "2026-09-03T09:00:00+00:00",
+        }
+
+    monkeypatch.setattr("app.db_workflow.reconcile_gmail_database", nothing_synced)
+    total = client.post("/api/control-center/sync")
+    assert total.status_code == 502
+    assert "shared@example.com" in total.json()["detail"]
+
+    monkeypatch.setattr("app.db_workflow.reconcile_gmail_database", partially_synced)
+    partial = client.post("/api/control-center/sync")
+    assert partial.status_code == 200
+    assert partial.json()["accounts_failed"][0]["email"] == "personal@example.com"
 
 
 def test_saved_draft_message_can_be_previewed(monkeypatch) -> None:

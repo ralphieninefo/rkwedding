@@ -66,6 +66,24 @@
   font-size: 12px;
 }
 
+.sync-panel {
+  border-color: rgba(180, 75, 75, 0.28);
+}
+
+.sync-problems {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.sync-problems li + li {
+  margin-top: 4px;
+}
+
+.sync-problems strong {
+  font-weight: 700;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

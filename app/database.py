@@ -1,5 +1,6 @@
 """Database models and small repository helpers for the control center."""
 
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,10 @@ from sqlalchemy.orm import (
 )
 
 from app.config import get_settings
+
+# SystemState keys written by the scheduled Gmail reconciliation.
+LAST_REFRESH_KEY = "gmail_last_refresh"
+SYNC_STATUS_KEY = "gmail_sync_status"
 
 
 def utcnow() -> datetime:
@@ -453,10 +458,11 @@ def dashboard_payload(session: Session) -> dict[str, object]:
         ) / 2
         for venue in priced
     ]
-    state = session.get(SystemState, "gmail_last_refresh")
+    state = session.get(SystemState, LAST_REFRESH_KEY)
     return {
         "venues": venues,
         "last_refreshed_at": state.value if state else None,
+        "sync_status": sync_status_payload(session),
         "price_overview": {
             "venue_count": len(priced),
             "average_eur": round(sum(midpoints) / len(midpoints)) if midpoints else None,
@@ -470,6 +476,70 @@ def dashboard_payload(session: Session) -> dict[str, object]:
             )) if priced else None,
         },
     }
+
+
+def sync_status_payload(session: Session) -> dict[str, object] | None:
+    """Expose the last scheduled-sync outcome so the UI can name a broken mailbox.
+
+    The record contains mailbox addresses, timestamps, and short error text
+    only; it never includes tokens, message bodies, or object keys.
+    """
+    raw = get_system_state(session, SYNC_STATUS_KEY)
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    raw_accounts = parsed.get("accounts")
+    accounts = [
+        item
+        for item in (raw_accounts if isinstance(raw_accounts, list) else [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "completed_at": parsed.get("completed_at"),
+        "accounts": [
+            {
+                "email": item.get("email"),
+                "is_primary": bool(item.get("is_primary")),
+                "status": item.get("status"),
+                "error": item.get("error"),
+                "last_success_at": item.get("last_success_at"),
+                "last_checked_at": item.get("last_checked_at"),
+            }
+            for item in accounts
+        ],
+        "failed_count": sum(1 for item in accounts if item.get("status") == "failed"),
+    }
+
+
+def clear_sync_failure(session: Session, email: str) -> bool:
+    """Mark a mailbox as reconnected so the dashboard stops asking for it.
+
+    The next scheduled run rewrites the whole record; until then the entry
+    reads ``reconnected`` rather than ``failed``. Returns whether a failed
+    entry for that mailbox existed.
+    """
+    status = sync_status_payload(session)
+    if status is None:
+        return False
+    normalized = email.strip().casefold()
+    cleared = False
+    for item in status["accounts"]:
+        if str(item.get("email", "")).casefold() != normalized:
+            continue
+        if item.get("status") == "failed":
+            cleared = True
+        item["status"] = "reconnected"
+        item["error"] = None
+    status["failed_count"] = sum(
+        1 for item in status["accounts"] if item.get("status") == "failed"
+    )
+    set_system_state(session, SYNC_STATUS_KEY, json.dumps(status))
+    return cleared
 
 
 def set_system_state(session: Session, key: str, value: str) -> None:

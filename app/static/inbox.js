@@ -9,6 +9,10 @@ const venueFormMessage = document.querySelector("#venueFormMessage");
 const discoverForm = document.querySelector("#discoverForm");
 const discoverMessage = document.querySelector("#discoverMessage");
 const setupPanel = document.querySelector("#setupPanel");
+const syncPanel = document.querySelector("#syncPanel");
+const syncPanelTitle = document.querySelector("#syncPanelTitle");
+const syncPanelHint = document.querySelector("#syncPanelHint");
+const syncProblems = document.querySelector("#syncProblems");
 const trackedCount = document.querySelector("#trackedCount");
 const lastCheck = document.querySelector("#lastCheck");
 const lastCheckDetail = document.querySelector("#lastCheckDetail");
@@ -38,6 +42,7 @@ const followupSubject = document.querySelector("#followupSubject");
 const followupBody = document.querySelector("#followupBody");
 const followupDialogMessage = document.querySelector("#followupDialogMessage");
 let allVenues = [];
+let connectedBadgeText = "";
 let pendingOutreachVenue = null;
 let pendingOutreachButton = null;
 let pendingOutreachButtonText = "";
@@ -78,6 +83,46 @@ const renderPriceOverview = (overview) => {
 const renderLastRefresh = (value) => {
   lastCheck.textContent = value ? formatDate(value) : "Not yet";
   lastCheckDetail.textContent = value ? "Last successful automatic Gmail update" : "Updates automatically every 15 minutes";
+};
+
+const renderSyncStatus = (syncStatus) => {
+  const accounts = syncStatus?.accounts || [];
+  const failed = accounts.filter((account) => account.status === "failed");
+  syncProblems.replaceChildren();
+  if (!failed.length) {
+    syncPanel.hidden = true;
+    if (connectedBadgeText) {
+      gmailStatus.textContent = connectedBadgeText;
+      gmailBadge.classList.remove("badge-offline");
+    }
+    return;
+  }
+  failed.forEach((account) => {
+    const item = document.createElement("li");
+    const mailbox = document.createElement("strong");
+    mailbox.textContent = account.email || "Unknown mailbox";
+    const detail = document.createElement("span");
+    const lastSuccess = account.last_success_at
+      ? ` Last successful check: ${formatDate(account.last_success_at)}.`
+      : " It has not synchronized successfully yet.";
+    detail.textContent = ` — ${account.error || "Could not be checked."}${lastSuccess}`;
+    item.append(mailbox, detail);
+    syncProblems.append(item);
+  });
+  const healthy = accounts.length - failed.length;
+  syncPanelTitle.textContent = failed.length === 1
+    ? "One Gmail account needs attention."
+    : `${failed.length} Gmail accounts need attention.`;
+  syncPanelHint.textContent = healthy > 0
+    ? `Automatic updates keep running for ${healthy === 1 ? "the other mailbox" : "the other mailboxes"}. Use “Add Gmail account” and choose the mailbox listed above to reconnect it.`
+    : "Automatic updates are paused until a mailbox is reconnected. Use “Add Gmail account” and choose the mailbox listed above.";
+  syncPanel.hidden = false;
+  lastCheckDetail.textContent = healthy > 0
+    ? `Last successful update · ${failed.length === 1 ? "one mailbox is" : `${failed.length} mailboxes are`} not updating`
+    : "Automatic updates are currently failing";
+  gmailStatus.textContent = "Gmail needs attention";
+  gmailBadge.classList.remove("badge-muted");
+  gmailBadge.classList.add("badge-offline");
 };
 
 const timestamp = (value) => value ? new Date(value).getTime() : 0;
@@ -329,6 +374,7 @@ const loadVenues = async () => {
   applyFilters();
   renderPriceOverview(result.price_overview);
   renderLastRefresh(result.last_refreshed_at);
+  renderSyncStatus(result.sync_status);
   return result.venues.length;
 };
 
@@ -406,7 +452,8 @@ const checkStatus = async () => {
   setupPanel.hidden = status.oauth_setup_ready;
   if (status.connected) {
     const accountCount = status.accounts?.length || 1;
-    gmailStatus.textContent = accountCount === 1 ? "1 Gmail connected" : `${accountCount} Gmail accounts`;
+    connectedBadgeText = accountCount === 1 ? "1 Gmail connected" : `${accountCount} Gmail accounts`;
+    gmailStatus.textContent = connectedBadgeText;
     gmailBadge.title = (status.accounts || []).map((account) => account.email).join("\n");
     gmailBadge.classList.remove("badge-muted", "badge-offline");
     connectButton.hidden = false;

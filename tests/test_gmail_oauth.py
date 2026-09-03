@@ -2,12 +2,15 @@
 
 import json
 
+import pytest
+from google.auth.exceptions import RefreshError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import gmail_oauth
 from app.config import Settings
-from app.database import Base, get_system_state, set_system_state
+from app.database import Base, GoogleAccount, get_system_state, set_system_state
+from app.google_auth import GoogleCredentialError
 
 
 def _temporary_sessions(tmp_path, monkeypatch):
@@ -82,6 +85,49 @@ def test_refresh_persists_updated_credential(tmp_path, monkeypatch) -> None:
         assert json.loads(
             get_system_state(session, gmail_oauth.TOKEN_STATE_KEY)
         ) == {"token": "refreshed"}
+
+
+def test_revoked_refresh_token_names_the_mailbox_to_reconnect(
+    tmp_path, monkeypatch
+) -> None:
+    sessions = _temporary_sessions(tmp_path, monkeypatch)
+    with sessions() as session:
+        account = GoogleAccount(
+            email="personal@example.com",
+            token_json='{"token":"stale"}',
+            is_primary=False,
+        )
+        session.add(account)
+        session.commit()
+        account_id = account.id
+
+    class FakeCredential:
+        expired = True
+        refresh_token = "refresh-token"
+        valid = False
+
+        def refresh(self, _request) -> None:
+            raise RefreshError("invalid_grant: Token has been expired or revoked.")
+
+        def to_json(self) -> str:
+            raise AssertionError("A failed refresh must not overwrite the stored token.")
+
+    class FakeCredentials:
+        @staticmethod
+        def from_authorized_user_info(_info, _scopes):
+            return FakeCredential()
+
+    monkeypatch.setattr(gmail_oauth, "Credentials", FakeCredentials)
+
+    with pytest.raises(GoogleCredentialError) as excinfo:
+        gmail_oauth.load_credentials(account_id)
+
+    assert excinfo.value.email == "personal@example.com"
+    assert "personal@example.com" in str(excinfo.value)
+    assert "Add Gmail account" in str(excinfo.value)
+    assert "invalid_grant" not in str(excinfo.value)
+    with sessions() as session:
+        assert session.get(GoogleAccount, account_id).token_json == '{"token":"stale"}'
 
 
 def test_client_secret_json_is_preferred_over_local_file(monkeypatch) -> None:
