@@ -2,7 +2,15 @@
 
 from datetime import datetime
 
-from app.database import Message, Outreach, Venue, iso_utc, sort_venue_payloads, venue_payload
+from app.database import (
+    Message,
+    Outreach,
+    Venue,
+    _gmail_url,
+    iso_utc,
+    sort_venue_payloads,
+    venue_payload,
+)
 from app.db_workflow import _fallback_summary, _is_incoming
 from app.gmail import GmailMessage
 
@@ -114,7 +122,35 @@ def test_venue_payload_uses_first_outreach_and_links_latest_thread() -> None:
     assert payload["sent_at"].startswith("2026-08-28")
     assert payload["created_at"].startswith("2026-08-27")
     assert payload["last_activity_at"].startswith("2026-08-29")
-    assert payload["gmail_url"].endswith("/thread-1")
+    assert "thread-1" in payload["gmail_url"]
+
+
+def test_gmail_url_forces_the_owning_google_account(monkeypatch) -> None:
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, _model, account_id):
+            assert account_id == 7
+            return type("Account", (), {"email": "shared@example.com"})()
+
+    monkeypatch.setattr("app.database.SessionLocal", FakeSession)
+    message = Message(
+        gmail_message_id="reply-shared",
+        gmail_thread_id="thread-shared",
+        gmail_account_id=7,
+        direction="inbound",
+        occurred_at=datetime(2026, 8, 29, 13),
+    )
+
+    url = _gmail_url("thread-shared", message, None)
+
+    assert "accounts.google.com/AccountChooser" in url
+    assert "shared%40example.com" in url
+    assert "thread-shared" in url
 
 
 def test_draft_creation_is_not_counted_as_message_activity() -> None:

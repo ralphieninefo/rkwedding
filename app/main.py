@@ -106,7 +106,9 @@ async def protect_hosted_control_center(request: Request, call_next):
 @app.get("/login", include_in_schema=False)
 async def login_page() -> FileResponse:
     """Serve a reliable application-owned login form."""
-    return FileResponse(STATIC_DIR / "login.html")
+    return FileResponse(
+        STATIC_DIR / "login.html", headers={"Cache-Control": "no-store"}
+    )
 
 
 @app.post("/api/login")
@@ -151,7 +153,9 @@ async def logout() -> JSONResponse:
 @app.get("/", include_in_schema=False)
 async def dashboard() -> FileResponse:
     """Serve the focused Gmail response tracker."""
-    return FileResponse(STATIC_DIR / "inbox.html")
+    return FileResponse(
+        STATIC_DIR / "inbox.html", headers={"Cache-Control": "no-store"}
+    )
 
 
 @app.get("/about", include_in_schema=False)
@@ -175,7 +179,9 @@ async def analysis_dashboard() -> FileResponse:
 @app.get("/venues", include_in_schema=False)
 async def venue_directory() -> FileResponse:
     """Serve the complete venue reference directory."""
-    return FileResponse(STATIC_DIR / "venues.html")
+    return FileResponse(
+        STATIC_DIR / "venues.html", headers={"Cache-Control": "no-store"}
+    )
 
 
 @app.get("/api/gmail/status")

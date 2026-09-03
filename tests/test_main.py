@@ -33,6 +33,7 @@ def test_dashboard_is_served() -> None:
     assert "Check Gmail" not in response.text
     assert "Workflow" not in response.text
     assert "Last automatic update" in response.text
+    assert response.headers["cache-control"] == "no-store"
 
 
 @pytest.mark.parametrize(

@@ -218,7 +218,9 @@ const renderVenues = (venues) => {
       reply.href = venue.gmail_url;
       reply.target = "_blank";
       reply.rel = "noopener";
-      reply.textContent = "Open in Gmail";
+      reply.textContent = venue.gmail_account_email
+        ? `Open in ${venue.gmail_account_email.split("@")[0]}`
+        : "Open in Gmail";
       if (venue.gmail_account_email) {
         reply.title = `Opens in ${venue.gmail_account_email}`;
         reply.setAttribute("aria-label", `Open in Gmail as ${venue.gmail_account_email}`);

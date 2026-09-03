@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote, urlencode
 
 from sqlalchemy import (
     Boolean,
@@ -365,6 +366,7 @@ def attachment_payload(attachment: Attachment) -> dict[str, object]:
         "received_at": iso_utc(message.occurred_at),
         "view_url": f"/api/documents/{attachment.id}/view",
         "gmail_url": _gmail_url(message.gmail_thread_id, message, None),
+        "gmail_account_email": _gmail_account_email(message),
     }
 
 
@@ -376,13 +378,23 @@ def _gmail_url(
     if thread_id is None:
         return None
     item = latest_reply or latest_outreach
-    auth_user = "0"
+    auth_user: str | None = None
     if item is not None and item.gmail_account_id is not None:
         with SessionLocal() as session:
             account = session.get(GoogleAccount, item.gmail_account_id)
             if account is not None:
                 auth_user = account.email
-    return f"https://mail.google.com/mail/?authuser={auth_user}#all/{thread_id}"
+    encoded_thread_id = quote(thread_id, safe="")
+    if auth_user is None:
+        return f"https://mail.google.com/mail/#all/{encoded_thread_id}"
+    mailbox_url = (
+        "https://mail.google.com/mail/?"
+        f"{urlencode({'authuser': auth_user})}#all/{encoded_thread_id}"
+    )
+    return (
+        "https://accounts.google.com/AccountChooser?"
+        + urlencode({"Email": auth_user, "continue": mailbox_url})
+    )
 
 
 def _gmail_account_email(item: Message | Outreach | None) -> str | None:
