@@ -13,6 +13,12 @@ let researchVenue = null;
 
 const formatDate = (value) => value ? new Date(value).toLocaleString([], {dateStyle:"medium",timeStyle:"short"}) : "—";
 const formatEuro = (value) => new Intl.NumberFormat([], {style:"currency",currency:"EUR",maximumFractionDigits:0}).format(value);
+const formatBytes = (value) => {
+  const bytes=Number(value||0); if(!bytes)return "";
+  if(bytes<1024)return `${bytes} B`;
+  if(bytes<1024*1024)return `${(bytes/1024).toFixed(1)} KB`;
+  return `${(bytes/(1024*1024)).toFixed(1)} MB`;
+};
 const addField = (list, label, value, link) => {
   const wrap=document.createElement("div"), term=document.createElement("dt"), detail=document.createElement("dd");
   term.textContent=label;
@@ -49,11 +55,27 @@ const render = (venues) => {
       if (venue.research_source_url) { const link=document.createElement("a"); link.href=venue.research_source_url; link.target="_blank"; link.rel="noopener"; link.textContent=" View source ↗"; source.append(link); }
       research.append(source);
     }
+    const documents=document.createElement("section"); documents.className="venue-documents";
+    const documentsHead=document.createElement("div"), documentsLabel=document.createElement("span"), documentsCount=document.createElement("small");
+    documentsLabel.textContent="Documents"; documentsCount.textContent=`${(venue.documents||[]).length} ${(venue.documents||[]).length===1?"file":"files"}`; documentsHead.append(documentsLabel,documentsCount); documents.append(documentsHead);
+    if (!(venue.documents||[]).length) {
+      const empty=document.createElement("p"); empty.className="venue-documents-empty"; empty.textContent="No Gmail attachments mirrored yet."; documents.append(empty);
+    } else {
+      const list=document.createElement("ul"); list.className="venue-document-list";
+      venue.documents.forEach((documentItem)=>{
+        const item=document.createElement("li"), info=document.createElement("div"), filename=document.createElement("strong"), context=document.createElement("small"), documentActions=document.createElement("div");
+        filename.textContent=documentItem.filename; context.textContent=[documentItem.subject,formatDate(documentItem.received_at),formatBytes(documentItem.byte_size)].filter(Boolean).join(" · "); info.append(filename,context);
+        const view=document.createElement("a"); view.href=documentItem.view_url; view.target="_blank"; view.rel="noopener"; view.textContent="View"; documentActions.append(view);
+        if(documentItem.gmail_url){ const original=document.createElement("a"); original.href=documentItem.gmail_url; original.target="_blank"; original.rel="noopener"; original.textContent="Open in Gmail"; documentActions.append(original); }
+        item.append(info,documentActions); list.append(item);
+      });
+      documents.append(list);
+    }
     const actions=document.createElement("div"); actions.className="venue-card-actions";
     const addResearch=document.createElement("button"); addResearch.className="button button-secondary"; addResearch.type="button"; addResearch.textContent=venue.research_notes?"Edit research":"Add research";
     addResearch.addEventListener("click",()=>openResearch(venue)); actions.append(addResearch);
     if (venue.gmail_url) { const gmail=document.createElement("a"); gmail.className="button button-primary"; gmail.href=venue.gmail_url; gmail.target="_blank"; gmail.rel="noopener"; gmail.textContent="Open in Gmail"; actions.append(gmail); }
-    card.append(head,meta,summary,details,research,actions); directory.append(card);
+    card.append(head,meta,summary,details,research,documents,actions); directory.append(card);
   });
   directoryCount.textContent=`${venues.length} venues`; directoryMessage.hidden=venues.length>0; directory.hidden=venues.length===0;
   if (!venues.length) directoryMessage.textContent="No venues match that search.";

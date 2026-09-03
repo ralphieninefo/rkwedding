@@ -34,6 +34,8 @@ Paste website → Review contact → Review and send inquiry → Track thread
 - Preview, edit, and explicitly send follow-up replies in the original Gmail thread.
 - Search and filter the tracking dashboard, or open the complete venue directory.
 - Keep human research notes separate from official venue replies and quotes.
+- Mirror Gmail attachments into one private Spaces bucket and show them beside
+  the venue with short-lived **View** and **Open in Gmail** links.
 
 ## Runtime architecture
 
@@ -142,6 +144,12 @@ Keep local credentials in `.env`. Never commit `.env`, OAuth client JSON, refres
 | `DIGITALOCEAN_MODEL_ACCESS_KEY` | Secret | Serverless Inference credential. |
 | `DIGITALOCEAN_MODEL_ID` | General | Exact deployed model identifier. |
 | `DIGITALOCEAN_INFERENCE_BASE_URL` | General | Serverless Inference API base URL. |
+| `SPACES_BUCKET` | General | One private bucket containing every mirrored document. |
+| `SPACES_REGION` | General | Spaces region; production uses `sfo2`. |
+| `SPACES_ENDPOINT_URL` | General | Optional endpoint override; normally derived from the region. |
+| `SPACES_ACCESS_KEY_ID` | Secret | Bucket-scoped Spaces access key ID. |
+| `SPACES_SECRET_ACCESS_KEY` | Secret | Bucket-scoped Spaces secret. |
+| `SPACES_PRESIGNED_URL_SECONDS` | General | Private view-link lifetime; defaults to 600 seconds. |
 
 `DIGITALOCEAN_API_TOKEN` is an operator credential for `doctl`; the application does not use it at runtime.
 
@@ -158,6 +166,7 @@ app/
 ├── inference.py        Kimi structured English synthesis
 ├── session_auth.py     Signed control-center session cookies
 ├── scheduled_sync.py   App Platform scheduled worker entry point
+├── storage.py          Private Spaces uploads and short-lived viewing URLs
 ├── documents.py        Embedded PDF-text extraction helper
 └── static/             Login, tracking, and venue-directory interfaces
 
@@ -173,6 +182,10 @@ The GitHub `main` branch deploys to DigitalOcean App Platform:
 - one FastAPI web service;
 - one managed PostgreSQL database binding;
 - one scheduled `gmail-sync` job at App Platform's 15-minute minimum interval.
+- one private Spaces bucket for Gmail attachments, addressed with
+  `venues/{venue_id}/messages/{gmail_message_id}/attachments/...` prefixes.
+
+See [`docs/SPACES_SETUP.md`](docs/SPACES_SETUP.md) for the production setup.
 
 Runtime secrets are configured as encrypted App Platform variables. Blank secret values in `.do/app.yaml` are intentional placeholders and must never be replaced with committed credentials.
 
@@ -182,12 +195,14 @@ Runtime secrets are configured as encrypted App Platform variables. Blank secret
 - Full message bodies are excluded from dashboard API responses.
 - Dashboard access and Gmail authorization are separate security decisions.
 - Website discovery accepts public HTTP(S) targets only and blocks private network addresses.
-- Embedded PDF text extraction exists, but attachment ingestion is not yet connected to the active scheduled database workflow.
+- Attachments are mirrored for viewing, but their contents are not automatically
+  sent to Kimi or OCR. Gmail remains authoritative for the original email.
 - Gmail ingestion uses scheduled polling, so a reply may take up to 15 minutes to appear.
 - Venue selection, contract acceptance, deposits, and calendar booking remain manual.
 
 ## Near-term roadmap
 
-1. Connect PDF attachment text to the active Gmail reconciliation pipeline.
-2. Add visible sync health and failure diagnostics without reintroducing a manual check requirement.
+1. Add visible sync health and attachment-failure diagnostics without
+   reintroducing a manual check requirement.
+2. Optionally extract embedded PDF text for quote synthesis; keep OCR on demand.
 3. Add shortlist and visit-planning views once quote data is sufficiently complete.

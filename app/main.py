@@ -272,6 +272,43 @@ async def sheet_venues() -> dict[str, object]:
         return dashboard_payload(session)
 
 
+@app.get("/api/documents/{document_id}/view")
+async def view_document(document_id: int) -> RedirectResponse:
+    """Authorize the dashboard user, then issue a short-lived Spaces URL."""
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    from app.database import Attachment, SessionLocal
+    from app.storage import SpacesStorage
+
+    settings = get_settings()
+    if not settings.spaces_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Private document storage is not configured.",
+        )
+    with SessionLocal() as session:
+        attachment = session.get(Attachment, document_id)
+        if attachment is None:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        object_key = attachment.object_key
+        filename = attachment.original_filename
+        content_type = attachment.content_type
+    try:
+        storage = SpacesStorage(settings)
+        url = await run_in_threadpool(
+            storage.presigned_view_url,
+            object_key=object_key,
+            filename=filename,
+            content_type=content_type,
+        )
+    except (BotoCoreError, ClientError, ValueError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="The private document link could not be created.",
+        ) from exc
+    return RedirectResponse(url, status_code=302)
+
+
 @app.post("/api/venues")
 async def create_venue(venue: VenueCreate) -> dict[str, object]:
     """Save a venue and send only when the user explicitly requests it."""
@@ -298,8 +335,14 @@ async def send_venue(venue_id: int) -> dict[str, object]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=401, detail="Connect Google before sending.") from exc
+    except httpx.HTTPStatusError as exc:
+        detail = _gmail_error_detail(exc, action="send the inquiry")
+        raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail="Gmail could not send the inquiry.") from exc
+        raise HTTPException(
+            status_code=502,
+            detail="Gmail could not send the inquiry. Please try again.",
+        ) from exc
 
 
 @app.get("/api/venues/{venue_id}/outreach-preview")
@@ -353,8 +396,26 @@ async def reply_to_venue(venue_id: int, reply: VenueReply) -> dict[str, object]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=401, detail="Connect Google first.") from exc
+    except httpx.HTTPStatusError as exc:
+        detail = _gmail_error_detail(exc, action="send the reply")
+        raise HTTPException(status_code=502, detail=detail) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail="Gmail could not send the reply.") from exc
+        raise HTTPException(
+            status_code=502,
+            detail="Gmail could not send the reply. Please try again.",
+        ) from exc
+
+
+def _gmail_error_detail(exc: httpx.HTTPStatusError, *, action: str) -> str:
+    """Return a safe, useful Gmail failure without leaking response contents."""
+    status_code = exc.response.status_code
+    if status_code == 401:
+        return f"Google authorization expired before Gmail could {action}. Reconnect it."
+    if status_code == 403:
+        return f"Gmail denied permission to {action}. Reconnect the sending account."
+    if status_code == 429:
+        return f"Gmail is temporarily rate limited and could not {action}. Try again shortly."
+    return f"Gmail could not {action} (HTTP {status_code}). Please try again."
 
 
 @app.get("/api/venues/{venue_id}/followup-preview")
@@ -456,6 +517,9 @@ async def health() -> dict[str, str]:
             else "local_only"
         ),
         "google_api": "configured" if settings.google_configured else "not_configured",
+        "document_storage": (
+            "configured" if settings.spaces_configured else "not_configured"
+        ),
     }
 
 

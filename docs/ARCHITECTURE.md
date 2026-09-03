@@ -27,6 +27,7 @@ flowchart TB
         WEB["FastAPI web service<br/>stateless container"]
         JOB["gmail-sync scheduled job<br/>every 15 minutes"]
         PG[("Managed PostgreSQL")]
+        SPACES[("Private Spaces bucket<br/>Gmail attachments")]
         KIMI["Serverless Inference<br/>Kimi K3"]
     end
 
@@ -44,6 +45,8 @@ flowchart TB
     UI2 --> WEB
     WEB <--> PG
     JOB <--> PG
+    WEB -->|short-lived signed reads| SPACES
+    JOB -->|private object writes| SPACES
     WEB <--> OAUTH
     WEB <--> G1
     WEB <--> G2
@@ -62,6 +65,7 @@ flowchart TB
 | `web` | UI, APIs, login, OAuth callbacks, contact discovery, preview/send actions | No |
 | `gmail-sync` | Scheduled Gmail/Sheet reconciliation and reply synthesis | No |
 | Managed PostgreSQL | Workflow records, normalized messages, OAuth tokens, estimates, checkpoints | Yes |
+| Private Spaces bucket | Original Gmail attachment bytes mirrored for venue browsing | Yes |
 | Serverless Inference | Stateless structured reply extraction | No |
 
 App Platform containers are replaceable. No required production state lives in the container filesystem.
@@ -72,9 +76,12 @@ App Platform containers are replaceable. No required production state lives in t
 erDiagram
     VENUE ||--o{ OUTREACH : has
     VENUE ||--o{ MESSAGE : has
+    VENUE ||--o{ ATTACHMENT : has
+    MESSAGE ||--o{ ATTACHMENT : includes
     VENUE ||--o| PRICE_ESTIMATE : has
     GOOGLE_ACCOUNT ||--o{ OUTREACH : sends
     GOOGLE_ACCOUNT ||--o{ MESSAGE : owns
+    GOOGLE_ACCOUNT ||--o{ ATTACHMENT : owns
 
     VENUE {
         int id PK
@@ -117,11 +124,26 @@ erDiagram
         text token_json
         boolean is_primary
     }
+    ATTACHMENT {
+        int id PK
+        int venue_id FK
+        int message_id FK
+        int gmail_account_id FK
+        string gmail_attachment_id UK
+        string object_key UK
+        string content_type
+        int byte_size
+        string sha256
+    }
 ```
 
 Additional `SystemState` records hold small checkpoints such as the latest successful Gmail refresh.
 
-PostgreSQL is authoritative for the dashboard. Gmail remains authoritative for complete conversation history. Google Sheets is a reference/import surface and may refresh non-empty venue metadata; it does not own runtime workflow status.
+PostgreSQL is authoritative for the dashboard. Gmail remains authoritative for
+complete conversation history and the original emailed attachment. Spaces is a
+private, indexed mirror of attachment bytes for convenient viewing. Google
+Sheets is a reference/import surface and may refresh non-empty venue metadata;
+it does not own runtime workflow status.
 
 ## 4. Venue onboarding and initial outreach
 
@@ -164,6 +186,7 @@ sequenceDiagram
     participant Gmail as Gmail API
     participant Sheet as Google Sheets
     participant Kimi as Kimi K3
+    participant Spaces as Private Spaces
     participant UI as Dashboard
 
     Cron->>Job: Start every 15 minutes
@@ -172,7 +195,10 @@ sequenceDiagram
     loop Each connected Gmail account
         Job->>Gmail: Search tracked addresses and known threads
         Gmail-->>Job: Normalized messages
-        Job->>DB: Skip known Gmail message IDs
+        Job->>DB: Create new message or load known message
+        Job->>Gmail: Download unmirrored attachments
+        Job->>Spaces: Store private object under venue/message prefix
+        Job->>DB: Store attachment metadata and checksum
         Job->>Kimi: Inbound subject/body only
         Kimi-->>Job: Validated English synthesis and estimate
         Job->>DB: Store message, status, summary, estimate
@@ -183,7 +209,40 @@ sequenceDiagram
 
 The dashboard does not need to trigger Gmail. It reads the last committed PostgreSQL state immediately. The maximum expected ingestion delay is the 15-minute scheduler interval plus processing time.
 
-## 6. Follow-up replies
+Attachment mirroring is deliberately separate from new-message creation. The
+worker revisits attachment references on known messages, allowing the first
+Spaces-enabled deployment to backfill recent documents idempotently.
+
+## 6. Private document viewing
+
+```mermaid
+sequenceDiagram
+    actor Human
+    participant UI
+    participant API
+    participant DB as PostgreSQL
+    participant Spaces as Private Spaces
+
+    Human->>UI: Click View document
+    UI->>API: GET /api/documents/{id}/view
+    API->>API: Validate signed dashboard session
+    API->>DB: Resolve private object metadata
+    API->>Spaces: Generate ten-minute signed GetObject URL
+    API-->>UI: 302 redirect to signed URL
+    UI->>Spaces: Read original document
+```
+
+There is one production bucket, not one bucket per venue. Keys use stable IDs:
+
+```text
+venues/{venue_id}/messages/{gmail_message_id}/attachments/
+  {gmail_attachment_id}/{sanitized_filename}
+```
+
+The bucket is private. The database does not expose object keys through the
+venue API, and the browser never receives a long-lived Spaces credential.
+
+## 7. Follow-up replies
 
 New outreach uses the configured primary shared account. A follow-up uses `gmail_account_id` from the inbound message so it stays in the account and thread that actually received the reply.
 
@@ -206,7 +265,7 @@ sequenceDiagram
     API->>DB: Store outbound message and Replied status
 ```
 
-## 7. Authentication and credentials
+## 8. Authentication and credentials
 
 ### Dashboard authentication
 
@@ -233,8 +292,9 @@ sequenceDiagram
 | Gmail refreshable tokens | PostgreSQL | No |
 | Model access key | App Platform encrypted environment on web and worker | No |
 | PostgreSQL URL | App Platform managed binding | No |
+| Spaces access key | App Platform encrypted environment on web and worker | No |
 
-## 8. AI contract
+## 9. AI contract
 
 The application sends a bounded prompt containing venue name, message subject, and at most 6,000 characters of body text. The expected output is validated as:
 
@@ -250,7 +310,7 @@ The application sends a bounded prompt containing venue name, message subject, a
 
 The model cannot call Gmail or write to PostgreSQL. Invalid, timed-out, or unavailable inference falls back to a non-destructive response marker; stored fallback records can be re-synthesized later.
 
-## 9. Reliability behavior
+## 10. Reliability behavior
 
 - Gmail message IDs are unique in PostgreSQL, preventing duplicate ingestion.
 - Known Gmail thread IDs catch replies sent from a venue employee's personal address.
@@ -259,8 +319,12 @@ The model cannot call Gmail or write to PostgreSQL. Invalid, timed-out, or unava
 - `/health` is the App Platform service probe.
 - A failed inference does not lose the underlying email body.
 - A failed scheduled run leaves the last successful database snapshot available to the UI.
+- Gmail attachment source IDs and deterministic object keys prevent duplicate
+  storage when the worker revisits a message.
+- A failed attachment upload is counted without discarding the synchronized
+  email; a later worker run retries it.
 
-## 10. Active versus legacy paths
+## 11. Active versus legacy paths
 
 ### Active production path
 
@@ -270,19 +334,21 @@ The model cannot call Gmail or write to PostgreSQL. Invalid, timed-out, or unava
 - Gmail API polling every 15 minutes
 - Google Sheets metadata refresh
 - Kimi structured response synthesis
+- private Spaces attachment mirroring and signed viewing
 
 ### Present but not central to production
 
 - older event/webhook routes in `app/main.py`;
 - deterministic comparison prototype at `/analysis`;
-- PDF text extraction helper;
+- PDF text extraction helper (not required for viewing);
 - Google Pub/Sub handlers.
 
 These remain for compatibility or future work, but scheduled database reconciliation is the current production ingestion architecture.
 
-## 11. Next architectural increments
+## 12. Next architectural increments
 
-1. Feed text-based PDF attachments into the same validated synthesis contract.
-2. Add an operator-visible scheduled-sync health indicator and error history.
+1. Add an operator-visible scheduled-sync and attachment-failure history.
+2. Optionally feed embedded PDF text into the validated synthesis contract;
+   leave image OCR as an explicit, on-demand operation.
 3. Add shortlist and visit entities only after quote coverage is reliable.
 4. Replace ad hoc schema additions with a formal migration tool if the data model grows materially.

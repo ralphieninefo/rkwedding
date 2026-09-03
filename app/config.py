@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     allow_unauthenticated_local: bool = False
     app_env: str = "local"
     database_url: str = "sqlite:///data/wedding.db"
+    spaces_bucket: str = ""
+    spaces_region: str = "sfo2"
+    spaces_endpoint_url: str = ""
+    spaces_access_key_id: SecretStr | None = None
+    spaces_secret_access_key: SecretStr | None = None
+    spaces_presigned_url_seconds: int = 600
+    spaces_max_attachment_bytes: int = 26_214_400
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -67,6 +74,23 @@ class Settings(BaseSettings):
             for email in self.google_allowed_emails.split(",")
             if email.strip()
         }
+
+    @property
+    def spaces_configured(self) -> bool:
+        """Return whether private attachment storage can be used."""
+        return bool(
+            self.spaces_bucket
+            and self.spaces_region
+            and self.spaces_access_key_id
+            and self.spaces_secret_access_key
+        )
+
+    @property
+    def resolved_spaces_endpoint_url(self) -> str:
+        """Return the configured endpoint or the standard regional endpoint."""
+        return self.spaces_endpoint_url or (
+            f"https://{self.spaces_region}.digitaloceanspaces.com"
+        )
 
 
 @lru_cache

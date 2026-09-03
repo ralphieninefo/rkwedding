@@ -6,10 +6,12 @@ from email.utils import getaddresses, parseaddr
 import re
 
 import httpx
+from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import select
 
 from app.config import Settings
 from app.database import (
+    Attachment,
     Message,
     Outreach,
     PriceEstimate,
@@ -25,6 +27,7 @@ from app.google_auth import get_google_access_token
 from app.inference import DigitalOceanInferenceClient, InvalidInferenceResponseError
 from app.models import ResponseSynthesis
 from app.sheets import GoogleSheetsClient
+from app.storage import AttachmentTooLargeError, SpacesStorage
 from app.workflow import OUTREACH_BODY, OUTREACH_SUBJECT
 
 
@@ -298,7 +301,9 @@ async def _reconcile_gmail_account(
     with SessionLocal() as session:
         venue_ids = [item for item in session.scalars(select(Venue.id)).all()]
 
+    storage = SpacesStorage(settings) if settings.spaces_configured else None
     sent = replies = new_messages = 0
+    attachments_mirrored = attachments_skipped = attachment_failures = 0
     for venue_id in venue_ids:
         with SessionLocal() as session:
             venue = session.get(Venue, venue_id)
@@ -343,24 +348,24 @@ async def _reconcile_gmail_account(
             if not outgoing and not incoming:
                 continue
             with SessionLocal() as session:
-                if session.scalar(
+                stored_message = session.scalar(
                     select(Message).where(
                         Message.gmail_message_id == message.message_id
                     )
-                ):
-                    continue
-            synthesis = ResponseSynthesis(summary="Message sent.")
-            status = ""
-            if incoming:
+                )
+                stored_message_id = stored_message.id if stored_message else None
+            if stored_message_id is None:
+                synthesis = ResponseSynthesis(summary="Message sent.")
+                status = ""
+                if incoming:
+                    with SessionLocal() as session:
+                        venue = session.get(Venue, venue_id)
+                        assert venue is not None
+                        synthesis, status = await _synthesize(settings, message, venue)
                 with SessionLocal() as session:
                     venue = session.get(Venue, venue_id)
                     assert venue is not None
-                    synthesis, status = await _synthesize(settings, message, venue)
-            with SessionLocal() as session:
-                venue = session.get(Venue, venue_id)
-                assert venue is not None
-                session.add(
-                    Message(
+                    stored_message = Message(
                         venue_id=venue_id,
                         gmail_message_id=message.message_id,
                         gmail_thread_id=message.thread_id,
@@ -372,38 +377,53 @@ async def _reconcile_gmail_account(
                         synthesized_summary=synthesis.summary if incoming else "",
                         occurred_at=_when(message.received_at),
                     )
-                )
-                if outgoing:
-                    if not session.scalar(
-                        select(Outreach).where(
-                            Outreach.gmail_message_id == message.message_id
-                        )
-                    ):
-                        session.add(
-                            Outreach(
-                                venue_id=venue_id,
-                                gmail_message_id=message.message_id,
-                                gmail_thread_id=message.thread_id,
-                                gmail_account_id=account_id,
-                                sent_at=_when(message.received_at),
+                    session.add(stored_message)
+                    session.flush()
+                    stored_message_id = stored_message.id
+                    if outgoing:
+                        if not session.scalar(
+                            select(Outreach).where(
+                                Outreach.gmail_message_id == message.message_id
+                            )
+                        ):
+                            session.add(
+                                Outreach(
+                                    venue_id=venue_id,
+                                    gmail_message_id=message.message_id,
+                                    gmail_thread_id=message.thread_id,
+                                    gmail_account_id=account_id,
+                                    sent_at=_when(message.received_at),
+                                )
+                            )
+                        prior_inbound = session.scalar(
+                            select(Message.id).where(
+                                Message.venue_id == venue_id,
+                                Message.direction == "inbound",
+                                Message.occurred_at < _when(message.received_at),
                             )
                         )
-                    prior_inbound = session.scalar(
-                        select(Message.id).where(
-                            Message.venue_id == venue_id,
-                            Message.direction == "inbound",
-                            Message.occurred_at < _when(message.received_at),
-                        )
-                    )
-                    venue.status = "Responded to venue" if prior_inbound else "Sent"
-                    sent += 1
-                else:
-                    venue.status = status
-                    venue.response_summary = synthesis.summary
-                    _save_estimate(session, venue_id, message.message_id, synthesis)
-                    replies += 1
-                session.commit()
-                new_messages += 1
+                        venue.status = "Responded to venue" if prior_inbound else "Sent"
+                        sent += 1
+                    else:
+                        venue.status = status
+                        venue.response_summary = synthesis.summary
+                        _save_estimate(session, venue_id, message.message_id, synthesis)
+                        replies += 1
+                    session.commit()
+                    new_messages += 1
+
+            assert stored_message_id is not None
+            result = await _mirror_message_attachments(
+                gmail=gmail,
+                storage=storage,
+                venue_id=venue_id,
+                stored_message_id=stored_message_id,
+                account_id=account_id,
+                message=message,
+            )
+            attachments_mirrored += result["mirrored"]
+            attachments_skipped += result["skipped"]
+            attachment_failures += result["failed"]
         with SessionLocal() as session:
             venue = session.get(Venue, venue_id)
             assert venue is not None
@@ -430,7 +450,77 @@ async def _reconcile_gmail_account(
         "new_messages": new_messages,
         "sent_confirmed": sent,
         "replies_synthesized": replies,
+        "attachments_mirrored": attachments_mirrored,
+        "attachments_skipped": attachments_skipped,
+        "attachment_failures": attachment_failures,
     }
+
+
+async def _mirror_message_attachments(
+    *,
+    gmail: GmailClient,
+    storage: SpacesStorage | None,
+    venue_id: int,
+    stored_message_id: int,
+    account_id: int,
+    message: GmailMessage,
+) -> dict[str, int]:
+    """Mirror each Gmail attachment once, including for previously known messages."""
+    counts = {"mirrored": 0, "skipped": 0, "failed": 0}
+    for gmail_attachment in message.attachments:
+        with SessionLocal() as session:
+            exists = session.scalar(
+                select(Attachment.id).where(
+                    Attachment.gmail_account_id == account_id,
+                    Attachment.gmail_message_id == message.message_id,
+                    Attachment.gmail_attachment_id
+                    == gmail_attachment.attachment_id,
+                )
+            )
+        if exists is not None:
+            counts["skipped"] += 1
+            continue
+        if storage is None:
+            counts["skipped"] += 1
+            continue
+        try:
+            data = await gmail.get_attachment(gmail_attachment)
+            stored = await asyncio.to_thread(
+                storage.put_attachment,
+                venue_id=venue_id,
+                gmail_message_id=message.message_id,
+                gmail_attachment_id=gmail_attachment.attachment_id,
+                filename=gmail_attachment.filename,
+                content_type=gmail_attachment.mime_type,
+                data=data,
+            )
+            with SessionLocal() as session:
+                session.add(
+                    Attachment(
+                        venue_id=venue_id,
+                        message_id=stored_message_id,
+                        gmail_account_id=account_id,
+                        gmail_message_id=message.message_id,
+                        gmail_attachment_id=gmail_attachment.attachment_id,
+                        object_key=stored.object_key,
+                        original_filename=gmail_attachment.filename,
+                        content_type=(
+                            gmail_attachment.mime_type or "application/octet-stream"
+                        ),
+                        byte_size=stored.byte_size,
+                        sha256=stored.sha256,
+                    )
+                )
+                session.commit()
+            counts["mirrored"] += 1
+        except (
+            AttachmentTooLargeError,
+            BotoCoreError,
+            ClientError,
+            httpx.HTTPError,
+        ):
+            counts["failed"] += 1
+    return counts
 
 
 async def reconcile_gmail_database(
@@ -445,6 +535,9 @@ async def reconcile_gmail_database(
         "new_messages": 0,
         "sent_confirmed": 0,
         "replies_synthesized": 0,
+        "attachments_mirrored": 0,
+        "attachments_skipped": 0,
+        "attachment_failures": 0,
     }
     synced_accounts: list[str] = []
     for account in accounts:

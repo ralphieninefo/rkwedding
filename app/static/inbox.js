@@ -43,6 +43,20 @@ let pendingOutreachButton = null;
 let pendingOutreachButtonText = "";
 let pendingFollowupVenue = null;
 
+const readApiResponse = async (response) => {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      response.ok
+        ? "The server returned an unreadable response. Please refresh and try again."
+        : `The request failed (${response.status}). Please refresh and try again.`,
+    );
+  }
+};
+
 const formatDate = (value) => value
   ? new Date(value).toLocaleString([], {dateStyle: "medium", timeStyle: "short"})
   : "—";
@@ -98,7 +112,7 @@ const openOutreachPreview = async (venue, button) => {
   button.textContent = "Loading draft…";
   try {
     const response = await fetch(`/api/venues/${venue.id}/outreach-preview`);
-    const preview = await response.json();
+    const preview = await readApiResponse(response);
     if (!response.ok) throw new Error(preview.detail || "Could not load inquiry.");
     pendingOutreachVenue = venue;
     pendingOutreachButton = button;
@@ -124,7 +138,7 @@ const openFollowupPreview = async (venue, button) => {
   button.textContent = "Loading reply…";
   try {
     const response = await fetch(`/api/venues/${venue.id}/followup-preview`);
-    const preview = await response.json();
+    const preview = await readApiResponse(response);
     if (!response.ok) throw new Error(preview.detail || "Could not prepare reply.");
     pendingFollowupVenue = venue;
     followupSummary.textContent = preview.response_summary || "Response received.";
@@ -205,6 +219,10 @@ const renderVenues = (venues) => {
       reply.target = "_blank";
       reply.rel = "noopener";
       reply.textContent = "Open in Gmail";
+      if (venue.gmail_account_email) {
+        reply.title = `Opens in ${venue.gmail_account_email}`;
+        reply.setAttribute("aria-label", `Open in Gmail as ${venue.gmail_account_email}`);
+      }
       actions.append(reply);
     }
 
@@ -246,7 +264,7 @@ confirmOutreach.addEventListener("click", async () => {
     const response = await fetch(`/api/venues/${pendingOutreachVenue.id}/send`, {
       method: "POST",
     });
-    const result = await response.json();
+    const result = await readApiResponse(response);
     if (!response.ok) throw new Error(result.detail || "Could not send inquiry.");
     const venueName = pendingOutreachVenue.name;
     outreachDialog.close();
@@ -283,7 +301,7 @@ confirmFollowup.addEventListener("click", async () => {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({body: followupBody.value.trim()}),
     });
-    const result = await response.json();
+    const result = await readApiResponse(response);
     if (!response.ok) throw new Error(result.detail || "Could not send reply.");
     const venueName = pendingFollowupVenue.name;
     followupDialog.close();
@@ -303,7 +321,7 @@ confirmFollowup.addEventListener("click", async () => {
 
 const loadVenues = async () => {
   const response = await fetch("/api/venues");
-  const result = await response.json();
+  const result = await readApiResponse(response);
   if (!response.ok) throw new Error(result.detail || "Could not load venues.");
   allVenues = result.venues;
   applyFilters();
@@ -323,7 +341,7 @@ discoverForm.addEventListener("submit", async (event) => {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({url: new FormData(discoverForm).get("url")}),
     });
-    const result = await response.json();
+    const result = await readApiResponse(response);
     if (!response.ok) throw new Error(result.detail || "Could not inspect that website.");
     venueForm.reset();
     ["name", "region", "location", "email", "website", "phone"].forEach((field) => {
@@ -356,7 +374,7 @@ venueForm.addEventListener("submit", async (event) => {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload),
     });
-    const result = await response.json();
+    const result = await readApiResponse(response);
     if (!response.ok) throw new Error(result.detail || "Could not save venue.");
     const savedVenue = {
       id: result.id,
@@ -382,7 +400,7 @@ venueForm.addEventListener("submit", async (event) => {
 
 const checkStatus = async () => {
   const response = await fetch("/api/gmail/status");
-  const status = await response.json();
+  const status = await readApiResponse(response);
   setupPanel.hidden = status.oauth_setup_ready;
   if (status.connected) {
     const accountCount = status.accounts?.length || 1;

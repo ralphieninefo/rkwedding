@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
     inspect,
     select,
@@ -75,6 +76,9 @@ class Venue(Base):
     messages: Mapped[list["Message"]] = relationship(
         back_populates="venue", cascade="all, delete-orphan"
     )
+    attachments: Mapped[list["Attachment"]] = relationship(
+        back_populates="venue", cascade="all, delete-orphan"
+    )
     estimate: Mapped["PriceEstimate | None"] = relationship(
         back_populates="venue", cascade="all, delete-orphan", uselist=False
     )
@@ -111,6 +115,41 @@ class Message(Base):
     synthesized_summary: Mapped[str] = mapped_column(Text, default="")
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     venue: Mapped[Venue] = relationship(back_populates="messages")
+    attachments: Mapped[list["Attachment"]] = relationship(
+        back_populates="message", cascade="all, delete-orphan"
+    )
+
+
+class Attachment(Base):
+    """Metadata for one Gmail attachment mirrored into private Spaces storage."""
+
+    __tablename__ = "attachments"
+    __table_args__ = (
+        UniqueConstraint(
+            "gmail_account_id",
+            "gmail_message_id",
+            "gmail_attachment_id",
+            name="uq_gmail_attachment_source",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue_id: Mapped[int] = mapped_column(ForeignKey("venues.id"), index=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("messages.id"), index=True)
+    gmail_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("google_accounts.id"), nullable=True, index=True
+    )
+    gmail_message_id: Mapped[str] = mapped_column(String(100), index=True)
+    gmail_attachment_id: Mapped[str] = mapped_column(String(1000))
+    object_key: Mapped[str] = mapped_column(String(1500), unique=True)
+    original_filename: Mapped[str] = mapped_column(String(500))
+    content_type: Mapped[str] = mapped_column(String(250), default="application/octet-stream")
+    byte_size: Mapped[int] = mapped_column(default=0)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    source: Mapped[str] = mapped_column(String(50), default="gmail")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    venue: Mapped[Venue] = relationship(back_populates="attachments")
+    message: Mapped[Message] = relationship(back_populates="attachments")
 
 
 class PriceEstimate(Base):
@@ -270,11 +309,8 @@ def venue_payload(venue: Venue) -> dict[str, object]:
         *[item.occurred_at for item in venue.messages],
     ]
     latest_activity = max(activity_times, default=None)
-    gmail_thread_id = (
-        latest_reply.gmail_thread_id
-        if latest_reply
-        else latest_outreach.gmail_thread_id if latest_outreach else None
-    )
+    gmail_item = _preferred_gmail_item(venue, latest_reply, latest_outreach)
+    gmail_thread_id = gmail_item.gmail_thread_id if gmail_item else None
     return {
         "id": venue.id,
         "name": venue.name,
@@ -303,7 +339,32 @@ def venue_payload(venue: Venue) -> dict[str, object]:
         "price_minimum_eur": venue.estimate.minimum_eur if venue.estimate else None,
         "price_maximum_eur": venue.estimate.maximum_eur if venue.estimate else None,
         "price_note": venue.estimate.note if venue.estimate else "",
-        "gmail_url": _gmail_url(gmail_thread_id, latest_reply, latest_outreach),
+        "gmail_url": _gmail_url(gmail_thread_id, gmail_item, None),
+        "gmail_account_email": _gmail_account_email(gmail_item),
+        "documents": [
+            attachment_payload(item)
+            for item in sorted(
+                venue.attachments,
+                key=lambda attachment: attachment.message.occurred_at,
+                reverse=True,
+            )
+        ],
+    }
+
+
+def attachment_payload(attachment: Attachment) -> dict[str, object]:
+    """Expose document metadata while keeping the private object key secret."""
+    message = attachment.message
+    return {
+        "id": attachment.id,
+        "filename": attachment.original_filename,
+        "content_type": attachment.content_type,
+        "byte_size": attachment.byte_size,
+        "source": attachment.source,
+        "subject": message.subject,
+        "received_at": iso_utc(message.occurred_at),
+        "view_url": f"/api/documents/{attachment.id}/view",
+        "gmail_url": _gmail_url(message.gmail_thread_id, message, None),
     }
 
 
@@ -322,6 +383,43 @@ def _gmail_url(
             if account is not None:
                 auth_user = account.email
     return f"https://mail.google.com/mail/?authuser={auth_user}#all/{thread_id}"
+
+
+def _gmail_account_email(item: Message | Outreach | None) -> str | None:
+    if item is None or item.gmail_account_id is None:
+        return None
+    with SessionLocal() as session:
+        account = session.get(GoogleAccount, item.gmail_account_id)
+        return account.email if account else None
+
+
+def _preferred_gmail_item(
+    venue: Venue,
+    latest_reply: Message | None,
+    latest_outreach: Outreach | None,
+) -> Message | Outreach | None:
+    """Prefer a thread owned by the configured sender when the venue has one."""
+    preferred_email = get_settings().google_primary_email.strip().casefold()
+    preferred_account_id: int | None = None
+    if preferred_email:
+        with SessionLocal() as session:
+            preferred_account_id = session.scalar(
+                select(GoogleAccount.id).where(GoogleAccount.email == preferred_email)
+            )
+    items: list[Message | Outreach] = [*venue.messages, *venue.outreach]
+    if preferred_account_id is not None:
+        preferred = [
+            item for item in items
+            if item.gmail_account_id == preferred_account_id
+        ]
+        if preferred:
+            return max(
+                preferred,
+                key=lambda item: (
+                    item.occurred_at if isinstance(item, Message) else item.sent_at
+                ),
+            )
+    return latest_reply or latest_outreach
 
 
 def list_venues(session: Session) -> list[dict[str, object]]:

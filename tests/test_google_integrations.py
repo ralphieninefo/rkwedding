@@ -91,6 +91,27 @@ async def test_dashboard_reply_stays_in_existing_gmail_thread() -> None:
     assert result.thread_id == "thread-1"
 
 
+@pytest.mark.anyio
+async def test_gmail_retries_transient_rate_limits(monkeypatch) -> None:
+    attempts = 0
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            return httpx.Response(429, json={"error": {"message": "rate limited"}})
+        return httpx.Response(200, json={"messages": []})
+
+    monkeypatch.setattr("app.gmail.asyncio.sleep", no_wait)
+    gmail = GmailClient("token", transport=httpx.MockTransport(handler))
+
+    assert await gmail.search_message_ids("from:venue@example.com") == []
+    assert attempts == 3
+
+
 class FakeGmail:
     def __init__(self, duplicates: list[str] | None = None) -> None:
         self.duplicates = duplicates or []

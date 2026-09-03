@@ -2,6 +2,7 @@
 
 import base64
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -70,6 +71,49 @@ def test_venue_directory_is_served() -> None:
     assert response.status_code == 200
     assert "All venue information" in response.text
     assert "Search venues" in response.text
+
+
+def test_private_document_view_redirects_to_short_lived_spaces_url(
+    monkeypatch,
+) -> None:
+    settings = Settings(
+        _env_file=None,
+        allow_unauthenticated_local=True,
+        spaces_bucket="wedding-documents",
+        spaces_access_key_id=SecretStr("key"),
+        spaces_secret_access_key=SecretStr("secret"),
+    )
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, _model, document_id):
+            assert document_id == 7
+            return SimpleNamespace(
+                object_key="venues/1/messages/2/attachments/3/quote.pdf",
+                original_filename="quote.pdf",
+                content_type="application/pdf",
+            )
+
+    class FakeStorage:
+        def __init__(self, received_settings):
+            assert received_settings is settings
+
+        def presigned_view_url(self, **_kwargs):
+            return "https://private.example/signed"
+
+    monkeypatch.setattr("app.database.SessionLocal", FakeSession)
+    monkeypatch.setattr("app.storage.SpacesStorage", FakeStorage)
+
+    response = client.get("/api/documents/7/view", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://private.example/signed"
 
 
 def test_saved_draft_can_be_sent(monkeypatch) -> None:

@@ -70,6 +70,22 @@ services:
         value: ""
         scope: RUN_TIME
         type: GENERAL
+      - key: SPACES_BUCKET
+        value: rkwedding
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SPACES_REGION
+        value: sfo2
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SPACES_ACCESS_KEY_ID
+        value: ""
+        scope: RUN_TIME
+        type: SECRET
+      - key: SPACES_SECRET_ACCESS_KEY
+        value: ""
+        scope: RUN_TIME
+        type: SECRET
 jobs:
   - name: gmail-sync
     kind: SCHEDULED
@@ -99,3 +115,19 @@ jobs:
         value: ""
         scope: RUN_TIME
         type: GENERAL
+      - key: SPACES_BUCKET
+        value: rkwedding
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SPACES_REGION
+        value: sfo2
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SPACES_ACCESS_KEY_ID
+        value: ""
+        scope: RUN_TIME
+        type: SECRET
+      - key: SPACES_SECRET_ACCESS_KEY
+        value: ""
+        scope: RUN_TIME
+        type: SECRET

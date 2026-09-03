@@ -1,5 +1,6 @@
 """Minimal Gmail REST client and MIME normalization."""
 
+import asyncio
 import base64
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -117,6 +118,21 @@ def normalize_message(raw: dict[str, Any]) -> GmailMessage:
     )
 
 
+def _retryable_gmail_response(response: httpx.Response) -> bool:
+    if response.status_code in {429, 500, 502, 503, 504}:
+        return True
+    if response.status_code != 403:
+        return False
+    try:
+        reasons = {
+            detail.get("reason", "")
+            for detail in response.json().get("error", {}).get("errors", [])
+        }
+    except (TypeError, ValueError):
+        return False
+    return bool(reasons & {"rateLimitExceeded", "userRateLimitExceeded"})
+
+
 class GmailClient:
     """Async Gmail API client using a short-lived OAuth access token."""
 
@@ -131,15 +147,21 @@ class GmailClient:
         self.headers = {"Authorization": f"Bearer {access_token}"}
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        async with httpx.AsyncClient(
-            base_url="https://gmail.googleapis.com/gmail/v1",
-            headers=self.headers,
-            timeout=30,
-            transport=self.transport,
-        ) as client:
-            response = await client.request(method, path, **kwargs)
+        for attempt in range(3):
+            async with httpx.AsyncClient(
+                base_url="https://gmail.googleapis.com/gmail/v1",
+                headers=self.headers,
+                timeout=30,
+                transport=self.transport,
+            ) as client:
+                response = await client.request(method, path, **kwargs)
+            if response.is_success:
+                return response.json()
+            if attempt < 2 and _retryable_gmail_response(response):
+                await asyncio.sleep(0.5 * (2**attempt))
+                continue
             response.raise_for_status()
-            return response.json()
+        raise RuntimeError("Gmail request retry loop ended unexpectedly.")
 
     async def list_added_message_ids(self, start_history_id: str) -> tuple[list[str], str]:
         """Return message IDs added since a durable Gmail history checkpoint."""
