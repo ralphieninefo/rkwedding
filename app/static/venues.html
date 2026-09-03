@@ -3,10 +3,11 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Complete wedding venue reference directory.">
+    <meta name="description" content="Every venue, with a shortlist comparison.">
     <title>All Venues · Wedding Venue Control Center</title>
     <link rel="stylesheet" href="/static/styles.css">
-    <link rel="stylesheet" href="/static/inbox.css">
+    <link rel="stylesheet" href="/static/shell.css">
+    <link rel="stylesheet" href="/static/home.css">
     <link rel="stylesheet" href="/static/venues.css">
   </head>
   <body>
@@ -18,38 +19,47 @@
         <span><strong>Venue Control Center</strong><small>Kassia &amp; Raphaël</small></span>
       </a>
       <nav class="site-nav" aria-label="Control center pages">
-        <a href="/">Tracking</a>
+        <a href="/">Next up</a>
         <a class="active" href="/venues">All venues</a>
       </nav>
-      <span class="badge"><span class="status-dot" aria-hidden="true"></span><span id="directoryCount">Loading</span></span>
-      <button class="session-link" id="logoutButton" type="button">Sign out</button>
+      <div class="header-tools">
+        <a class="icon-button" href="/#settings" title="Settings" aria-label="Settings">⚙</a>
+        <button class="session-link" id="logoutButton" type="button">Sign out</button>
+      </div>
     </header>
 
-    <main class="page-shell directory-shell">
-      <section class="directory-hero">
-        <div><p class="eyebrow">Complete reference</p><h1>All venue information.</h1><p class="hero-description">Contacts, locations, pricing, outreach history, and response details in one place.</p></div>
-        <label class="directory-search"><span>Search venues</span><input id="venueSearch" type="search" placeholder="Name, region, email…"></label>
+    <main class="page-shell">
+      <section class="page-intro">
+        <div>
+          <p class="eyebrow">Complete reference</p>
+          <h1>All venue information.</h1>
+          <p id="directorySummary">Loading…</p>
+        </div>
       </section>
+
+      <section class="panel compare-panel" id="comparePanel" hidden>
+        <div class="compare-head">
+          <div><p class="eyebrow">Shortlist</p><h2>Compare your shortlist</h2></div>
+          <p class="compare-budget" id="compareBudget"></p>
+        </div>
+        <div class="compare-wrap">
+          <table class="compare-table">
+            <thead><tr><th>Venue</th><th>Region</th><th>Estimate for 90</th><th>vs budget</th><th>Capacity</th><th>Availability</th><th>Status</th><th>Visit</th></tr></thead>
+            <tbody id="compareRows"></tbody>
+          </table>
+        </div>
+        <p class="compare-hint" id="compareHint"></p>
+      </section>
+
+      <div class="toolbar">
+        <label class="search"><span>Search venues</span><input id="venueSearch" type="search" placeholder="Name, region, e-mail, status…" autocomplete="off"></label>
+        <label class="sort"><span>Order by</span><select id="venueSort"><option value="name">Name</option><option value="price">Estimate</option><option value="activity">Recent activity</option><option value="added">Recently added</option></select></label>
+      </div>
       <p class="tracker-message" id="directoryMessage">Loading venue directory…</p>
-      <section class="venue-directory" id="venueDirectory" hidden></section>
+      <ul class="venue-list" id="venueList" hidden></ul>
     </main>
 
-    <dialog class="outreach-dialog" id="researchDialog" aria-labelledby="researchDialogTitle">
-      <div class="outreach-dialog-heading">
-        <div><p class="eyebrow">Human research</p><h2 id="researchDialogTitle">Add venue notes</h2></div>
-        <button class="dialog-close" id="closeResearchDialog" type="button" aria-label="Close research">×</button>
-      </div>
-      <form id="researchForm" class="research-form">
-        <label><span>Source type</span><select name="source_type"><option value="Reddit">Reddit</option><option value="Direct contact">Direct contact</option><option value="Referral">Referral</option><option value="Website">Website</option><option value="Other">Other</option></select></label>
-        <label><span>Source link</span><input name="source_url" type="url" placeholder="https://reddit.com/…"></label>
-        <label><span>Contact name</span><input name="contact_name" placeholder="Who shared this?"></label>
-        <label class="research-notes"><span>Notes</span><textarea name="notes" required placeholder="Paste Kasia's findings here…"></textarea></label>
-        <p class="form-message" id="researchMessage" role="status"></p>
-        <div class="outreach-dialog-actions"><button class="button button-secondary" id="cancelResearch" type="button">Cancel</button><button class="button button-primary" type="submit">Save research</button></div>
-      </form>
-    </dialog>
-
-    <footer class="site-footer"><span>Control center · Full venue metadata</span><a href="/">Back to tracking ↗</a></footer>
-    <script src="/static/venues.js?v=20260903-2" defer></script>
+    <footer class="site-footer"><span>Private app · Kassia &amp; Raphaël</span></footer>
+    <script src="/static/venues.js?v=20260903-3" defer></script>
   </body>
 </html>

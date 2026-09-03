@@ -32,9 +32,18 @@ def test_dashboard_is_served() -> None:
     assert response.status_code == 200
     assert "Wedding Venue Control Center" in response.text
     assert "Private venue workspace" in response.text
+    assert "Next up" in response.text
     assert "Check Gmail" not in response.text
     assert "Workflow" not in response.text
-    assert "Last automatic update" in response.text
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_venue_page_is_served_for_numeric_ids() -> None:
+    response = client.get("/venues/12")
+
+    assert response.status_code == 200
+    assert "Conversation" in response.text
+    assert "Documents" in response.text
     assert response.headers["cache-control"] == "no-store"
 
 
@@ -194,6 +203,68 @@ def test_manual_sync_is_not_a_success_when_no_mailbox_could_be_checked(
     partial = client.post("/api/control-center/sync")
     assert partial.status_code == 200
     assert partial.json()["accounts_failed"][0]["email"] == "personal@example.com"
+
+
+def test_venue_dossier_and_edit_routes_map_errors(monkeypatch) -> None:
+    from app.db_workflow import VenueConflictError
+
+    def missing(_venue_id):
+        raise ValueError("Venue not found.")
+
+    def clash(_venue_id, **_fields):
+        raise VenueConflictError("Another venue already uses that e-mail address.")
+
+    def has_history(_venue_id):
+        raise VenueConflictError("This venue has Gmail history. Mark it as passed instead of deleting it.")
+
+    monkeypatch.setattr("app.db_workflow.venue_detail", missing)
+    monkeypatch.setattr("app.db_workflow.update_venue", clash)
+    monkeypatch.setattr("app.db_workflow.delete_venue", has_history)
+
+    assert client.get("/api/venues/99").status_code == 404
+    duplicate = client.patch("/api/venues/99", json={"email": "taken@example.com"})
+    assert duplicate.status_code == 409
+    assert "already uses" in duplicate.json()["detail"]
+    assert client.patch("/api/venues/99", json={"decision": "maybe"}).status_code == 422
+    deletion = client.delete("/api/venues/99")
+    assert deletion.status_code == 409
+    assert "passed" in deletion.json()["detail"]
+
+
+def test_reminder_routes_preview_then_send(monkeypatch) -> None:
+    captured = {}
+
+    def fake_preview(venue_id):
+        return {
+            "id": venue_id,
+            "venue": "Villa Test",
+            "recipient": "info@example.com",
+            "subject": "Re: Richiesta informazioni",
+            "gmail_account_email": "shared@example.com",
+            "body": "Gentile sollecito.",
+        }
+
+    async def fake_send(_settings, venue_id, body):
+        captured["body"] = body
+        return {"sent": True, "reminder_sent_at": "2026-09-03T12:00:00+00:00"}
+
+    monkeypatch.setattr("app.db_workflow.reminder_preview", fake_preview)
+    monkeypatch.setattr("app.db_workflow.send_venue_reminder", fake_send)
+
+    preview = client.get("/api/venues/13/reminder-preview")
+    sent = client.post("/api/venues/13/remind", json={"body": "Gentile sollecito, edited."})
+
+    assert preview.status_code == 200
+    assert preview.json()["gmail_account_email"] == "shared@example.com"
+    assert sent.status_code == 200
+    assert captured["body"] == "Gentile sollecito, edited."
+
+
+def test_reply_drafting_explains_when_the_model_is_not_configured() -> None:
+    response = client.post("/api/venues/13/draft-reply", json={"points": "Thank them."})
+
+    assert response.status_code == 503
+    assert "Write the reply directly" in response.json()["detail"]
 
 
 def test_saved_draft_message_can_be_previewed(monkeypatch) -> None:

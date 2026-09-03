@@ -13,9 +13,11 @@ from sqlalchemy import select
 
 from app.config import Settings
 from app.database import (
+    BUDGET_KEY,
     LAST_REFRESH_KEY,
     SYNC_STATUS_KEY,
     Attachment,
+    GoogleAccount,
     Message,
     Outreach,
     PriceEstimate,
@@ -23,17 +25,33 @@ from app.database import (
     Venue,
     get_system_state,
     iso_utc,
+    preferences_payload,
     set_system_state,
     sync_status_payload,
     upsert_venue,
+    venue_detail_payload,
 )
-from app.email_templates import FOLLOWUP_BODY, OUTREACH_BODY, OUTREACH_SUBJECT
+from app.email_templates import (
+    FOLLOWUP_BODY,
+    OUTREACH_BODY,
+    OUTREACH_SUBJECT,
+    REMINDER_BODY,
+)
 from app.gmail import GmailClient, GmailMessage
 from app.gmail_oauth import default_google_account_id, list_google_accounts
 from app.google_auth import GoogleCredentialError, get_google_access_token
 from app.inference import DigitalOceanInferenceClient, InvalidInferenceResponseError
 from app.models import ResponseSynthesis
 from app.storage import AttachmentTooLargeError, SpacesStorage
+from app.venue_state import DECISIONS
+
+# Venues with no stored history for a mailbox are searched this far back so
+# older conversations (for example in the personal mailbox) are attached.
+HISTORICAL_SEARCH_DAYS = 365
+
+
+class VenueConflictError(ValueError):
+    """The requested change collides with another venue or with history."""
 
 # Failures that affect one mailbox only. They are recorded per account so a
 # revoked token or a Gmail outage on one mailbox never blocks the other.
@@ -55,11 +73,24 @@ def _when(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def _is_outgoing(message: GmailMessage, venue_email: str) -> bool:
-    return (
-        "SENT" in message.label_ids
-        and venue_email in _addresses(message.recipients)
+def _is_outgoing(
+    message: GmailMessage,
+    venue_email: str,
+    known_thread_ids: set[str] | frozenset[str] = frozenset(),
+) -> bool:
+    """A message we sent to the venue address, or inside a known venue thread.
+
+    The second case covers a manual reply to a staff member's personal
+    address from Gmail itself; it still counts as our follow-up.
+    """
+    return "SENT" in message.label_ids and (
+        venue_email in _addresses(message.recipients)
+        or message.thread_id in known_thread_ids
     )
+
+
+def _sender_address(message: GmailMessage) -> str:
+    return parseaddr(message.sender)[1].strip().casefold()
 
 
 def _is_incoming(
@@ -118,6 +149,36 @@ def outreach_preview(venue_id: int) -> dict[str, object]:
         }
 
 
+async def _existing_conversation_accounts(
+    settings: Settings, email: str, sending_account_id: int | None
+) -> tuple[list[str], list[str]]:
+    """Return mailboxes that already hold a conversation with this address.
+
+    Every connected mailbox is searched, not only the sender, because earlier
+    inquiries may live in the personal mailbox. Mailboxes that cannot be
+    checked right now are reported separately rather than silently skipped.
+    """
+    found: list[str] = []
+    unchecked: list[str] = []
+    for account in list_google_accounts():
+        account_id = int(account["id"])
+        mailbox = str(account["email"])
+        try:
+            token = await get_google_access_token(settings, account_id)
+            gmail = GmailClient(token, settings.google_gmail_user_id)
+            existing = await gmail.search_message_ids(
+                f"in:anywhere {{to:{email} from:{email}}}", max_results=1
+            )
+        except (GoogleCredentialError, ValueError, httpx.HTTPError):
+            if account_id == sending_account_id:
+                raise
+            unchecked.append(mailbox)
+            continue
+        if existing:
+            found.append(mailbox)
+    return found, unchecked
+
+
 async def send_venue_inquiry(
     settings: Settings, venue_id: int
 ) -> dict[str, object]:
@@ -126,24 +187,29 @@ async def send_venue_inquiry(
         venue = session.get(Venue, venue_id)
         if venue is None:
             raise ValueError("Venue not found.")
-        if venue.outreach:
+        if venue.outreach or venue.messages:
             return {"id": venue_id, "status": venue.status, "sent": False}
         email = venue.email
 
     account_id = default_google_account_id()
-    token = await get_google_access_token(settings, account_id)
-    gmail = GmailClient(token, settings.google_gmail_user_id)
-    existing = await gmail.search_message_ids(
-        f"in:anywhere {{to:{email} from:{email}}}", max_results=1
-    )
-    if existing:
+    if account_id is None:
+        raise FileNotFoundError("No Google OAuth credential is stored in the database.")
+    found, unchecked = await _existing_conversation_accounts(settings, email, account_id)
+    if found:
         with SessionLocal() as session:
             venue = session.get(Venue, venue_id)
             assert venue is not None
             venue.status = "Existing conversation"
             session.commit()
-        return {"id": venue_id, "status": "Existing conversation", "sent": False}
+        return {
+            "id": venue_id,
+            "status": "Existing conversation",
+            "sent": False,
+            "existing_in": found,
+        }
 
+    token = await get_google_access_token(settings, account_id)
+    gmail = GmailClient(token, settings.google_gmail_user_id)
     result = await gmail.send_message(email, OUTREACH_SUBJECT, OUTREACH_BODY)
     now = datetime.now(UTC)
     with SessionLocal() as session:
@@ -159,8 +225,27 @@ async def send_venue_inquiry(
                 sent_at=now,
             )
         )
+        session.add(
+            Message(
+                venue_id=venue_id,
+                gmail_message_id=result.message_id,
+                gmail_thread_id=result.thread_id,
+                gmail_account_id=account_id,
+                direction="outbound",
+                kind="inquiry",
+                subject=OUTREACH_SUBJECT,
+                body=OUTREACH_BODY,
+                synthesized_summary="",
+                occurred_at=now,
+            )
+        )
         session.commit()
-    return {"id": venue_id, "status": "Sent", "sent": True}
+    return {
+        "id": venue_id,
+        "status": "Sent",
+        "sent": True,
+        "unchecked_mailboxes": unchecked,
+    }
 
 
 async def _synthesize(
@@ -248,8 +333,19 @@ async def _reconcile_gmail_account(
             if venue is None:
                 continue
             venue_email = venue.email
+            has_history_here = session.scalar(
+                select(Message.id).where(
+                    Message.venue_id == venue_id,
+                    Message.gmail_account_id == account_id,
+                ).limit(1)
+            ) is not None
+        # The first time a venue is checked in a mailbox, look a full year back
+        # so earlier conversations (for example in the personal mailbox) are
+        # attached; afterwards the short window keeps each run cheap.
+        search_days = days if has_history_here else max(days, HISTORICAL_SEARCH_DAYS)
         ids = await gmail.search_message_ids(
-            f"in:anywhere newer_than:{days}d {{to:{venue_email} from:{venue_email}}}",
+            f"in:anywhere newer_than:{search_days}d "
+            f"{{to:{venue_email} from:{venue_email}}}",
             max_results=100,
         )
         messages_by_id = {
@@ -270,6 +366,15 @@ async def _reconcile_gmail_account(
                     )
                 ).all()
             )
+            known_thread_ids.update(
+                session.scalars(
+                    select(Message.gmail_thread_id).where(
+                        Message.venue_id == venue_id,
+                        Message.gmail_account_id == account_id,
+                        Message.direction == "outbound",
+                    )
+                ).all()
+            )
         # A venue employee may reply from a personal address rather than the
         # public contact address. Once our exact-address outbound message has
         # established the Gmail thread, ingest replies from that whole thread.
@@ -281,7 +386,7 @@ async def _reconcile_gmail_account(
         messages = list(messages_by_id.values())
         messages.sort(key=lambda item: item.received_at)
         for message in messages:
-            outgoing = _is_outgoing(message, venue_email)
+            outgoing = _is_outgoing(message, venue_email, known_thread_ids)
             incoming = _is_incoming(message, venue_email, known_thread_ids)
             if not outgoing and not incoming:
                 continue
@@ -292,6 +397,15 @@ async def _reconcile_gmail_account(
                     )
                 )
                 stored_message_id = stored_message.id if stored_message else None
+                if (
+                    stored_message is not None
+                    and stored_message.direction == "inbound"
+                    and not stored_message.sender_email
+                ):
+                    # Backfill the exact reply-to address for older rows so
+                    # reply previews and sends agree.
+                    stored_message.sender_email = _sender_address(message)
+                    session.commit()
             if stored_message_id is None:
                 synthesis = ResponseSynthesis(summary="Message sent.")
                 status = ""
@@ -310,6 +424,7 @@ async def _reconcile_gmail_account(
                         gmail_account_id=account_id,
                         rfc_message_id=message.rfc_message_id or "",
                         direction="outbound" if outgoing else "inbound",
+                        sender_email="" if outgoing else _sender_address(message),
                         subject=message.subject,
                         body=message.body,
                         synthesized_summary=synthesis.summary if incoming else "",
@@ -566,27 +681,47 @@ async def reconcile_gmail_database(
     }
 
 
+def _reply_subject(subject: str) -> str:
+    subject = subject or OUTREACH_SUBJECT
+    if subject.casefold().startswith(("re:", "r:")):
+        return subject
+    return f"Re: {subject}"
+
+
+def _latest_inbound(session, venue_id: int) -> Message | None:
+    return session.scalar(
+        select(Message)
+        .where(Message.venue_id == venue_id, Message.direction == "inbound")
+        .order_by(Message.occurred_at.desc())
+    )
+
+
+def _account_email(session, account_id: int | None) -> str | None:
+    if account_id is None:
+        return None
+    account = session.get(GoogleAccount, account_id)
+    return account.email if account else None
+
+
 def followup_preview(venue_id: int) -> dict[str, object]:
-    """Prepare, but do not send, a reply to the latest venue response."""
+    """Prepare, but do not send, a reply to the latest venue response.
+
+    The recipient, subject, and sending mailbox shown here are exactly the
+    values ``reply_to_venue`` uses, so what the couple approves is what goes.
+    """
     with SessionLocal() as session:
         venue = session.get(Venue, venue_id)
         if venue is None:
             raise ValueError("Venue not found.")
-        latest = session.scalar(
-            select(Message)
-            .where(Message.venue_id == venue_id, Message.direction == "inbound")
-            .order_by(Message.occurred_at.desc())
-        )
+        latest = _latest_inbound(session, venue_id)
         if latest is None:
             raise ValueError("This venue has not replied yet.")
-        subject = latest.subject or OUTREACH_SUBJECT
-        if not subject.casefold().startswith(("re:", "r:")):
-            subject = f"Re: {subject}"
         return {
             "id": venue.id,
             "venue": venue.name,
-            "recipient": venue.email,
-            "subject": subject,
+            "recipient": latest.sender_email or venue.email,
+            "subject": _reply_subject(latest.subject),
+            "gmail_account_email": _account_email(session, latest.gmail_account_id),
             "response_summary": venue.response_summary,
             "body": FOLLOWUP_BODY,
         }
@@ -620,25 +755,17 @@ async def reply_to_venue(settings: Settings, venue_id: int, body: str) -> dict[s
         venue = session.get(Venue, venue_id)
         if venue is None:
             raise ValueError("Venue not found.")
-        latest = session.scalar(
-            select(Message)
-            .where(Message.venue_id == venue_id, Message.direction == "inbound")
-            .order_by(Message.occurred_at.desc())
-        )
+        latest = _latest_inbound(session, venue_id)
         if latest is None:
             raise ValueError("This venue has not replied yet.")
         latest_id = latest.gmail_message_id
         thread_id = latest.gmail_thread_id
         account_id = latest.gmail_account_id
+        recipient = latest.sender_email or venue.email
+        subject = _reply_subject(latest.subject)
     token = await get_google_access_token(settings, account_id)
     gmail = GmailClient(token, settings.google_gmail_user_id)
     source = await gmail.get_message(latest_id)
-    recipient = parseaddr(source.sender)[1] or venue.email
-    subject = (
-        source.subject
-        if source.subject.casefold().startswith(("re:", "r:"))
-        else f"Re: {source.subject}"
-    )
     result = await gmail.send_reply(
         recipient=recipient,
         subject=subject,
@@ -651,20 +778,235 @@ async def reply_to_venue(settings: Settings, venue_id: int, body: str) -> dict[s
     with SessionLocal() as session:
         venue = session.get(Venue, venue_id)
         assert venue is not None
-        venue.status = "Replied"
+        venue.status = "Responded to venue"
         session.add(Message(
             venue_id=venue_id,
             gmail_message_id=result.message_id,
             gmail_thread_id=result.thread_id,
             gmail_account_id=account_id,
             direction="outbound",
+            kind="reply",
             subject=subject,
             body=body.strip(),
             synthesized_summary="",
             occurred_at=now,
         ))
         session.commit()
-    return {"sent": True, "status": "Replied"}
+    return {"sent": True, "status": "Responded to venue"}
+
+
+def _reminder_anchor(session, venue_id: int) -> tuple[Message | None, Outreach | None]:
+    """Return the latest message we sent (the thread a reminder continues)."""
+    latest_outbound = session.scalar(
+        select(Message)
+        .where(Message.venue_id == venue_id, Message.direction == "outbound")
+        .order_by(Message.occurred_at.desc())
+    )
+    latest_outreach = session.scalar(
+        select(Outreach)
+        .where(Outreach.venue_id == venue_id)
+        .order_by(Outreach.sent_at.desc())
+    )
+    if latest_outbound is None and latest_outreach is None:
+        return None, None
+    if latest_outbound is None:
+        return None, latest_outreach
+    if latest_outreach is None or latest_outbound.occurred_at >= latest_outreach.sent_at:
+        return latest_outbound, None
+    return None, latest_outreach
+
+
+def reminder_preview(venue_id: int) -> dict[str, object]:
+    """Prepare, but do not send, a polite reminder in the existing thread."""
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        anchor_message, anchor_outreach = _reminder_anchor(session, venue_id)
+        if anchor_message is None and anchor_outreach is None:
+            raise ValueError("No inquiry has been sent to this venue yet.")
+        latest_inbound = _latest_inbound(session, venue_id)
+        account_id = (
+            anchor_message.gmail_account_id
+            if anchor_message is not None
+            else anchor_outreach.gmail_account_id
+        )
+        subject_source = (
+            anchor_message.subject if anchor_message is not None else OUTREACH_SUBJECT
+        )
+        return {
+            "id": venue.id,
+            "venue": venue.name,
+            "recipient": (
+                latest_inbound.sender_email if latest_inbound and latest_inbound.sender_email
+                else venue.email
+            ),
+            "subject": _reply_subject(subject_source),
+            "gmail_account_email": _account_email(session, account_id),
+            "body": REMINDER_BODY,
+        }
+
+
+async def send_venue_reminder(
+    settings: Settings, venue_id: int, body: str
+) -> dict[str, object]:
+    """Send an explicit reminder inside the thread and mailbox we already used."""
+    preview = reminder_preview(venue_id)
+    with SessionLocal() as session:
+        anchor_message, anchor_outreach = _reminder_anchor(session, venue_id)
+        assert anchor_message is not None or anchor_outreach is not None
+        anchor_gmail_id = (
+            anchor_message.gmail_message_id
+            if anchor_message is not None
+            else anchor_outreach.gmail_message_id
+        )
+        thread_id = (
+            anchor_message.gmail_thread_id
+            if anchor_message is not None
+            else anchor_outreach.gmail_thread_id
+        )
+        account_id = (
+            anchor_message.gmail_account_id
+            if anchor_message is not None
+            else anchor_outreach.gmail_account_id
+        )
+    token = await get_google_access_token(settings, account_id)
+    gmail = GmailClient(token, settings.google_gmail_user_id)
+    source = await gmail.get_message(anchor_gmail_id)
+    result = await gmail.send_reply(
+        recipient=str(preview["recipient"]),
+        subject=str(preview["subject"]),
+        body=body.strip(),
+        thread_id=thread_id,
+        in_reply_to=source.rfc_message_id,
+        references=source.references,
+    )
+    now = datetime.now(UTC)
+    with SessionLocal() as session:
+        session.add(Message(
+            venue_id=venue_id,
+            gmail_message_id=result.message_id,
+            gmail_thread_id=result.thread_id,
+            gmail_account_id=account_id,
+            direction="outbound",
+            kind="reminder",
+            subject=str(preview["subject"]),
+            body=body.strip(),
+            synthesized_summary="",
+            occurred_at=now,
+        ))
+        session.commit()
+    return {"sent": True, "reminder_sent_at": iso_utc(now)}
+
+
+async def draft_reply(settings: Settings, venue_id: int, points: str) -> dict[str, object]:
+    """Ask Kimi for an Italian draft from English points; never sends anything."""
+    if not settings.inference_configured:
+        raise InferenceUnavailableError(
+            "Reply drafting needs the Kimi model configuration. Write the reply directly."
+        )
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        venue_name = venue.name
+        summary = venue.response_summary or ""
+    try:
+        body = await asyncio.wait_for(
+            DigitalOceanInferenceClient(settings).draft_reply(
+                venue=venue_name, latest_summary=summary, points=points
+            ),
+            timeout=45,
+        )
+    except (TimeoutError, httpx.HTTPError, InvalidInferenceResponseError) as exc:
+        raise InferenceUnavailableError(
+            "The drafting model did not answer. Try again or write the reply directly."
+        ) from exc
+    return {"id": venue_id, "body": body}
+
+
+class InferenceUnavailableError(RuntimeError):
+    """Kimi is not configured or did not answer; the user can write by hand."""
+
+
+def _parse_visit(value: str) -> datetime | None:
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    parsed = datetime.fromisoformat(cleaned.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def update_venue(venue_id: int, **fields: object) -> dict[str, object]:
+    """Edit venue details or record a decision; ``None`` leaves a field alone."""
+    text_fields = {
+        "name", "region", "location", "website", "phone", "notes",
+        "guest_capacity", "availability", "vibe",
+    }
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        email = fields.get("email")
+        if isinstance(email, str):
+            normalized = email.strip().casefold()
+            clash = session.scalar(
+                select(Venue.id).where(Venue.email == normalized, Venue.id != venue_id)
+            )
+            if clash is not None:
+                raise VenueConflictError(
+                    "Another venue already uses that e-mail address."
+                )
+            venue.email = normalized
+        for name in text_fields:
+            value = fields.get(name)
+            if isinstance(value, str):
+                setattr(venue, name, value.strip())
+        decision = fields.get("decision")
+        if isinstance(decision, str):
+            if decision not in DECISIONS:
+                raise ValueError("Unknown decision.")
+            venue.decision = decision
+        visit = fields.get("visit_at")
+        if isinstance(visit, str):
+            try:
+                venue.visit_at = _parse_visit(visit)
+            except ValueError as exc:
+                raise ValueError("Enter the visit as a date, e.g. 2026-10-12.") from exc
+        session.commit()
+        return venue_detail_payload(session, venue)
+
+
+def venue_detail(venue_id: int) -> dict[str, object]:
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        return venue_detail_payload(session, venue)
+
+
+def delete_venue(venue_id: int) -> dict[str, object]:
+    """Remove a venue that never had any correspondence; history is kept."""
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        if venue.outreach or venue.messages or venue.attachments:
+            raise VenueConflictError(
+                "This venue has Gmail history. Mark it as passed instead of deleting it."
+            )
+        session.delete(venue)
+        session.commit()
+        return {"id": venue_id, "deleted": True}
+
+
+def update_preferences(*, budget_eur: float | None) -> dict[str, object]:
+    with SessionLocal() as session:
+        if budget_eur is not None:
+            set_system_state(session, BUDGET_KEY, str(round(float(budget_eur))))
+        return preferences_payload(session)
 
 
 async def backfill_response_insights(settings: Settings) -> dict[str, int]:

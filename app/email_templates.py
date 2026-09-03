@@ -15,6 +15,16 @@ Cordiali saluti,
 Raphaël
 """
 
+REMINDER_BODY = """Buongiorno,
+
+vi scrivo per un gentile sollecito in merito alla nostra richiesta di informazioni per il matrimonio, previsto indicativamente tra la fine di settembre e l’inizio di ottobre, per circa 90 invitati.
+
+Se possibile, potreste indicarci la disponibilità della location e inviarci un preventivo o maggiori informazioni sui pacchetti disponibili?
+
+Grazie mille e cordiali saluti,
+Raphaël
+"""
+
 FOLLOWUP_BODY = """Buongiorno,
 
 grazie mille per le informazioni e per il preventivo. Stiamo confrontando le opzioni e avremmo piacere di approfondire disponibilità, servizi inclusi ed eventuali costi aggiuntivi per circa 90 invitati.

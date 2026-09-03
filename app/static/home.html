@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Private control center for wedding venue outreach.">
+    <title>Wedding Venue Control Center</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/shell.css">
+    <link rel="stylesheet" href="/static/home.css">
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Wedding Venue Control Center home">
+        <span class="brand-mark" aria-hidden="true">KR</span>
+        <span><strong>Venue Control Center</strong><small>Kassia &amp; Raphaël</small></span>
+      </a>
+      <nav class="site-nav" aria-label="Control center pages">
+        <a class="active" href="/">Next up</a>
+        <a href="/venues">All venues</a>
+      </nav>
+      <div class="header-tools">
+        <button class="icon-button" id="settingsButton" type="button" title="Settings" aria-label="Settings">⚙</button>
+        <button class="session-link" id="logoutButton" type="button">Sign out</button>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="page-intro">
+        <div>
+          <p class="eyebrow">Private venue workspace</p>
+          <h1>Next up.</h1>
+          <p id="queueSummary">Loading your venues…</p>
+        </div>
+        <button class="button button-primary" id="addVenueButton" type="button">Add venue</button>
+      </section>
+
+      <section class="notice notice-alert" id="syncPanel" hidden role="status" aria-live="polite">
+        <strong id="syncPanelTitle">A Gmail account needs attention.</strong>
+        <ul id="syncProblems"></ul>
+        <p id="syncPanelHint"></p>
+      </section>
+
+      <section class="notice" id="setupPanel" hidden>
+        <strong>Google is not connected yet.</strong>
+        <p>Open <em>Settings</em> and add the shared wedding Gmail account before sending inquiries.</p>
+      </section>
+
+      <div class="toolbar">
+        <label class="search"><span>Find a venue</span><input id="venueFilter" type="search" placeholder="Name, region, town…" autocomplete="off"></label>
+        <p class="update-line" id="updateLine"></p>
+      </div>
+
+      <p class="tracker-message" id="trackerMessage">Loading…</p>
+      <div id="queue"></div>
+    </main>
+
+    <dialog class="dialog" id="addVenueDialog" aria-labelledby="addVenueTitle">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">New venue</p><h2 id="addVenueTitle">Add a venue</h2></div>
+        <button class="dialog-close" type="button" data-close="addVenueDialog" aria-label="Close">×</button>
+      </div>
+      <form id="discoverForm" class="fields discover">
+        <label><span>Venue website</span><input name="url" type="url" placeholder="https://villa.example" autocomplete="off"></label>
+        <button class="button button-secondary" type="submit">Find contact details</button>
+        <p class="message" id="discoverMessage" role="status">Paste the website and the app finds the name, e-mail, phone, and region. Or type the details below.</p>
+      </form>
+      <form id="venueForm" class="fields fields-two">
+        <label class="span-two"><span>Venue name</span><input name="name" required autocomplete="organization"></label>
+        <label><span>Region</span><input name="region" placeholder="Lago Albano, Gaeta, Rome…"></label>
+        <label><span>Town / location</span><input name="location"></label>
+        <label><span>E-mail</span><input name="email" type="email" required></label>
+        <label><span>Phone</span><input name="phone" type="tel"></label>
+        <label class="span-two"><span>Website</span><input name="website" type="url" placeholder="https://"></label>
+        <p class="message span-two" id="venueFormMessage" role="status"></p>
+        <div class="dialog-actions span-two">
+          <button class="button button-secondary" type="submit" value="draft">Save for later</button>
+          <button class="button button-primary" type="submit" value="send">Review inquiry</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="dialog" id="settingsDialog" aria-labelledby="settingsTitle">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">Setup</p><h2 id="settingsTitle">Settings</h2></div>
+        <button class="dialog-close" type="button" data-close="settingsDialog" aria-label="Close">×</button>
+      </div>
+      <section class="settings-section">
+        <h3>Gmail accounts</h3>
+        <ul class="account-list" id="accountList"></ul>
+        <p class="message" id="accountMessage"></p>
+        <a class="button button-secondary button-link" id="connectButton" href="/auth/google/start">Add or reconnect a Gmail account</a>
+      </section>
+      <section class="settings-section">
+        <h3>Budget</h3>
+        <form id="budgetForm" class="budget-form">
+          <label><span>Venue budget for 90 guests (EUR)</span><input id="budgetInput" name="budget_eur" type="number" min="0" step="500" placeholder="e.g. 30000"></label>
+          <button class="button button-secondary button-small" type="submit">Save</button>
+        </form>
+        <p class="message" id="budgetMessage" role="status"></p>
+      </section>
+      <section class="settings-section">
+        <h3>Automatic updates</h3>
+        <p class="settings-copy" id="settingsSync">Gmail is checked every 15 minutes.</p>
+      </section>
+    </dialog>
+
+    <footer class="site-footer"><span>Private app · Kassia &amp; Raphaël</span></footer>
+    <script src="/static/actions.js?v=20260903-1"></script>
+    <script src="/static/home.js?v=20260903-1" defer></script>
+  </body>
+</html>

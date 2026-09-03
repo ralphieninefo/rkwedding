@@ -104,7 +104,10 @@ def normalize_message(raw: dict[str, Any]) -> GmailMessage:
         message_id=message_id,
         thread_id=raw["threadId"],
         sender=headers.get("from", ""),
-        recipients=headers.get("to", ""),
+        # Cc counts as addressed too: an inquiry that copied the venue is ours.
+        recipients=", ".join(
+            part for part in (headers.get("to", ""), headers.get("cc", "")) if part
+        ),
         subject=headers.get("subject", ""),
         body=body,
         received_at=datetime.fromtimestamp(

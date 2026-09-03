@@ -22,7 +22,9 @@ from app.models import (
     ControlCenterLogin,
     GmailEvent,
     GmailPushReceipt,
+    PreferencesUpdate,
     PubSubEnvelope,
+    ReplyDraftRequest,
     VenueComparisonRequest,
     VenueComparisonResponse,
     VenueCreate,
@@ -32,6 +34,7 @@ from app.models import (
     VenueOutreachReceipt,
     VenueReply,
     VenueResearchUpdate,
+    VenueUpdate,
 )
 from app.scoring import rank_venues
 from app.session_auth import (
@@ -157,9 +160,9 @@ async def logout() -> JSONResponse:
 
 @app.get("/", include_in_schema=False)
 async def dashboard() -> FileResponse:
-    """Serve the focused Gmail response tracker."""
+    """Serve the next-action home screen."""
     return FileResponse(
-        STATIC_DIR / "inbox.html", headers={"Cache-Control": "no-store"}
+        STATIC_DIR / "home.html", headers={"Cache-Control": "no-store"}
     )
 
 
@@ -187,6 +190,69 @@ async def venue_directory() -> FileResponse:
     return FileResponse(
         STATIC_DIR / "venues.html", headers={"Cache-Control": "no-store"}
     )
+
+
+@app.get("/venues/{venue_id:int}", include_in_schema=False)
+async def venue_page(venue_id: int) -> FileResponse:
+    """Serve the venue dossier page; the browser loads the data by id."""
+    return FileResponse(
+        STATIC_DIR / "venue.html", headers={"Cache-Control": "no-store"}
+    )
+
+
+@app.get("/api/venues/{venue_id}")
+async def venue_detail_api(venue_id: int) -> dict[str, object]:
+    """Return one venue's dossier with its message timeline (no full bodies)."""
+    from app.db_workflow import venue_detail
+
+    try:
+        return await run_in_threadpool(venue_detail, venue_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.patch("/api/venues/{venue_id}")
+async def update_venue_api(venue_id: int, update: VenueUpdate) -> dict[str, object]:
+    """Edit venue details, shortlist or pass it, or plan a visit."""
+    from app.db_workflow import VenueConflictError, update_venue
+
+    try:
+        return await run_in_threadpool(
+            update_venue, venue_id, **update.model_dump(exclude_unset=True)
+        )
+    except VenueConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        status_code = 404 if str(exc) == "Venue not found." else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.delete("/api/venues/{venue_id}")
+async def delete_venue_api(venue_id: int) -> dict[str, object]:
+    """Delete a venue that has no Gmail history; otherwise it must be passed."""
+    from app.db_workflow import VenueConflictError, delete_venue
+
+    try:
+        return await run_in_threadpool(delete_venue, venue_id)
+    except VenueConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/preferences")
+async def preferences_api() -> dict[str, object]:
+    from app.database import SessionLocal, preferences_payload
+
+    with SessionLocal() as session:
+        return preferences_payload(session)
+
+
+@app.patch("/api/preferences")
+async def update_preferences_api(update: PreferencesUpdate) -> dict[str, object]:
+    from app.db_workflow import update_preferences
+
+    return await run_in_threadpool(update_preferences, **update.model_dump())
 
 
 @app.get("/api/gmail/status")
@@ -433,9 +499,58 @@ async def preview_venue_followup(venue_id: int) -> dict[str, object]:
     from app.db_workflow import followup_preview
 
     try:
-        return followup_preview(venue_id)
+        return await run_in_threadpool(followup_preview, venue_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/venues/{venue_id}/draft-reply")
+async def draft_venue_reply(venue_id: int, request: ReplyDraftRequest) -> dict[str, object]:
+    """Draft an Italian reply from English points; the user still reviews and sends."""
+    from app.db_workflow import InferenceUnavailableError, draft_reply
+
+    try:
+        return await draft_reply(get_settings(), venue_id, request.points)
+    except InferenceUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/venues/{venue_id}/reminder-preview")
+async def preview_venue_reminder(venue_id: int) -> dict[str, object]:
+    """Show the exact reminder (thread, mailbox, recipient) before sending."""
+    from app.db_workflow import reminder_preview
+
+    try:
+        return await run_in_threadpool(reminder_preview, venue_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/venues/{venue_id}/remind")
+async def remind_venue(venue_id: int, reply: VenueReply) -> dict[str, object]:
+    """Send one explicit reminder inside the thread and mailbox already used."""
+    from app.db_workflow import send_venue_reminder
+
+    try:
+        return await send_venue_reminder(get_settings(), venue_id, reply.body)
+    except GoogleCredentialError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except GoogleAuthError as exc:
+        raise HTTPException(status_code=502, detail=GOOGLE_TRANSIENT_DETAIL) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=401, detail="Connect Google first.") from exc
+    except httpx.HTTPStatusError as exc:
+        detail = _gmail_error_detail(exc, action="send the reminder")
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Gmail could not send the reminder. Please try again.",
+        ) from exc
 
 
 @app.patch("/api/venues/{venue_id}/research")

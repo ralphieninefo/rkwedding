@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="One venue: conversation, facts, documents, and notes.">
+    <title>Venue · Wedding Venue Control Center</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/shell.css">
+    <link rel="stylesheet" href="/static/home.css">
+    <link rel="stylesheet" href="/static/venue.css">
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Wedding Venue Control Center home">
+        <span class="brand-mark" aria-hidden="true">KR</span>
+        <span><strong>Venue Control Center</strong><small>Kassia &amp; Raphaël</small></span>
+      </a>
+      <nav class="site-nav" aria-label="Control center pages">
+        <a href="/">Next up</a>
+        <a href="/venues">All venues</a>
+      </nav>
+      <div class="header-tools">
+        <a class="icon-button" href="/#settings" title="Settings" aria-label="Settings">⚙</a>
+        <button class="session-link" id="logoutButton" type="button">Sign out</button>
+      </div>
+    </header>
+
+    <main class="page-shell venue-shell">
+      <a class="back-link" href="/">← Next up</a>
+      <p class="tracker-message" id="pageMessage">Loading venue…</p>
+
+      <section class="venue-head" id="venueHead" hidden>
+        <div class="venue-head-copy">
+          <p class="eyebrow" id="venuePlace"></p>
+          <h1 id="venueName"></h1>
+          <div class="venue-chips" id="venueChips"></div>
+          <p class="next-label" id="venueNext"></p>
+        </div>
+        <div class="venue-head-actions" id="venueActions"></div>
+      </section>
+
+      <div class="venue-grid" id="venueGrid" hidden>
+        <section class="panel venue-panel">
+          <div class="panel-head"><h2>In short</h2></div>
+          <p class="venue-summary" id="venueSummary"></p>
+          <dl class="facts" id="venueFacts"></dl>
+        </section>
+
+        <section class="panel venue-panel">
+          <div class="panel-head"><h2>Conversation</h2><small id="conversationCount"></small></div>
+          <ol class="timeline" id="timeline"></ol>
+          <p class="empty" id="timelineEmpty" hidden>No e-mails yet.</p>
+        </section>
+
+        <section class="panel venue-panel">
+          <div class="panel-head"><h2>Documents</h2><small id="documentsCount"></small></div>
+          <ul class="documents" id="documents"></ul>
+          <p class="empty" id="documentsEmpty" hidden>No attachments mirrored yet. Quotes sent as attachments appear here automatically.</p>
+        </section>
+
+        <section class="panel venue-panel">
+          <div class="panel-head"><h2>Your notes</h2><button class="button button-secondary button-small" id="saveNotes" type="button">Save notes</button></div>
+          <textarea id="notesField" class="notes-field" placeholder="Anything you want to remember about this venue…"></textarea>
+          <p class="message" id="notesMessage" role="status"></p>
+          <div class="research" id="researchBox">
+            <div class="panel-head"><h3>Human research</h3><button class="button button-secondary button-small" id="editResearch" type="button">Edit</button></div>
+            <p id="researchText"></p>
+            <small id="researchSource"></small>
+          </div>
+        </section>
+
+        <section class="panel venue-panel">
+          <div class="panel-head"><h2>Contact details</h2><button class="button button-secondary button-small" id="editDetails" type="button">Edit</button></div>
+          <dl class="facts" id="contactFacts"></dl>
+          <p class="danger-zone" id="dangerZone" hidden><button class="button button-danger button-small" id="deleteVenue" type="button">Delete this venue</button> <span>Only possible before any e-mail exists.</span></p>
+        </section>
+      </div>
+    </main>
+
+    <dialog class="dialog" id="detailsDialog" aria-labelledby="detailsTitle">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">Venue</p><h2 id="detailsTitle">Edit details</h2></div>
+        <button class="dialog-close" type="button" data-close="detailsDialog" aria-label="Close">×</button>
+      </div>
+      <form id="detailsForm" class="fields fields-two">
+        <label class="span-two"><span>Venue name</span><input name="name" required></label>
+        <label><span>Region</span><input name="region"></label>
+        <label><span>Town / location</span><input name="location"></label>
+        <label><span>E-mail</span><input name="email" type="email" required></label>
+        <label><span>Phone</span><input name="phone" type="tel"></label>
+        <label class="span-two"><span>Website</span><input name="website" type="url"></label>
+        <label><span>Capacity</span><input name="guest_capacity" placeholder="e.g. up to 120 seated"></label>
+        <label><span>Availability for our dates</span><input name="availability" placeholder="e.g. 2 Oct 2027 free"></label>
+        <label><span>Planned visit (date)</span><input name="visit_at" type="date"></label>
+        <label><span>Vibe</span><input name="vibe" placeholder="e.g. lakeside villa, rustic"></label>
+        <p class="message span-two" id="detailsMessage" role="status"></p>
+        <div class="dialog-actions span-two">
+          <button class="button button-secondary" type="button" data-close="detailsDialog">Cancel</button>
+          <button class="button button-primary" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="dialog" id="researchDialog" aria-labelledby="researchDialogTitle">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">Human research</p><h2 id="researchDialogTitle">Research notes</h2></div>
+        <button class="dialog-close" type="button" data-close="researchDialog" aria-label="Close">×</button>
+      </div>
+      <form id="researchForm" class="fields fields-two">
+        <label><span>Source type</span><select name="source_type"><option value="Reddit">Reddit</option><option value="Direct contact">Direct contact</option><option value="Phone call">Phone call</option><option value="Referral">Referral</option><option value="Website">Website</option><option value="Other">Other</option></select></label>
+        <label><span>Contact name</span><input name="contact_name" placeholder="Who shared this?"></label>
+        <label class="span-two"><span>Source link</span><input name="source_url" type="url" placeholder="https://…"></label>
+        <label class="span-two"><span>Notes</span><textarea name="notes" required placeholder="What did you learn?"></textarea></label>
+        <p class="message span-two" id="researchMessage" role="status">Research stays separate from what the venue wrote by e-mail.</p>
+        <div class="dialog-actions span-two">
+          <button class="button button-secondary" type="button" data-close="researchDialog">Cancel</button>
+          <button class="button button-primary" type="submit">Save research</button>
+        </div>
+      </form>
+    </dialog>
+
+    <footer class="site-footer"><span>Private app · Kassia &amp; Raphaël</span></footer>
+    <script src="/static/actions.js?v=20260903-1"></script>
+    <script src="/static/venue.js?v=20260903-1" defer></script>
+  </body>
+</html>

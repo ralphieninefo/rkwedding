@@ -196,6 +196,41 @@ class VenueReply(BaseModel):
     body: str = Field(min_length=1, max_length=10_000)
 
 
+class VenueUpdate(BaseModel):
+    """Editable venue details and the couple's decision; omitted fields stay."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=250)
+    region: str | None = Field(default=None, max_length=250)
+    location: str | None = Field(default=None, max_length=250)
+    email: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=320,
+        pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$",
+    )
+    website: str | None = Field(default=None, max_length=500)
+    phone: str | None = Field(default=None, max_length=100)
+    notes: str | None = Field(default=None, max_length=20_000)
+    guest_capacity: str | None = Field(default=None, max_length=100)
+    availability: str | None = Field(default=None, max_length=500)
+    vibe: str | None = Field(default=None, max_length=250)
+    decision: Literal["", "shortlisted", "passed"] | None = None
+    # ISO date or datetime; an empty string clears a planned visit.
+    visit_at: str | None = Field(default=None, max_length=40)
+
+
+class PreferencesUpdate(BaseModel):
+    """Couple-level settings such as the venue budget."""
+
+    budget_eur: float | None = Field(default=None, ge=0, le=10_000_000)
+
+
+class ReplyDraftRequest(BaseModel):
+    """English points the couple wants turned into an Italian reply draft."""
+
+    points: str = Field(min_length=1, max_length=4_000)
+
+
 class VenueResearchUpdate(BaseModel):
     """Human-sourced research kept separate from official venue quotes."""
 

@@ -29,10 +29,13 @@ from sqlalchemy.orm import (
 )
 
 from app.config import get_settings
+from app.venue_state import STAGE_ORDER, derive_state
 
 # SystemState keys written by the scheduled Gmail reconciliation.
 LAST_REFRESH_KEY = "gmail_last_refresh"
 SYNC_STATUS_KEY = "gmail_sync_status"
+# The inquiry template asks for roughly this many guests.
+GUEST_COUNT = 90
 
 
 def utcnow() -> datetime:
@@ -71,6 +74,13 @@ class Venue(Base):
         DateTime(timezone=True), nullable=True
     )
     status: Mapped[str] = mapped_column(String(50), default="Draft")
+    # The couple's own decision: "", "shortlisted", or "passed".
+    decision: Mapped[str] = mapped_column(String(30), default="")
+    visit_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Availability for the requested dates, extracted from replies or typed.
+    availability: Mapped[str] = mapped_column(String(500), default="")
     response_summary: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -116,6 +126,12 @@ class Message(Base):
     )
     rfc_message_id: Mapped[str] = mapped_column(String(500), default="", index=True)
     direction: Mapped[str] = mapped_column(String(20))
+    # "inquiry", "reply", or "reminder" for messages the app sent; "" when the
+    # message was discovered in Gmail.
+    kind: Mapped[str] = mapped_column(String(30), default="")
+    # Address the inbound message came from (may differ from the venue's
+    # public contact address); the exact recipient for a reply.
+    sender_email: Mapped[str] = mapped_column(String(320), default="")
     subject: Mapped[str] = mapped_column(String(500), default="")
     body: Mapped[str] = mapped_column(Text, default="")
     synthesized_summary: Mapped[str] = mapped_column(Text, default="")
@@ -153,6 +169,8 @@ class Attachment(Base):
     byte_size: Mapped[int] = mapped_column(default=0)
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     source: Mapped[str] = mapped_column(String(50), default="gmail")
+    # Embedded text of PDF quotes, used for synthesis; empty for scans/images.
+    extracted_text: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     venue: Mapped[Venue] = relationship(back_populates="attachments")
     message: Mapped[Message] = relationship(back_populates="attachments")
@@ -236,6 +254,9 @@ def init_database() -> None:
         "research_contact_name": "VARCHAR(250) DEFAULT ''",
         "research_notes": "TEXT DEFAULT ''",
         "research_updated_at": "TIMESTAMP NULL",
+        "decision": "VARCHAR(30) DEFAULT ''",
+        "visit_at": "TIMESTAMP NULL",
+        "availability": "VARCHAR(500) DEFAULT ''",
     }
     with ENGINE.begin() as connection:
         for name, definition in additions.items():
@@ -249,7 +270,10 @@ def init_database() -> None:
             "messages": {
                 "gmail_account_id": "INTEGER NULL",
                 "rfc_message_id": "VARCHAR(500) DEFAULT ''",
+                "kind": "VARCHAR(30) DEFAULT ''",
+                "sender_email": "VARCHAR(320) DEFAULT ''",
             },
+            "attachments": {"extracted_text": "TEXT DEFAULT ''"},
         }
         for table_name, requested in table_additions.items():
             existing = {
@@ -301,7 +325,53 @@ def upsert_venue(
     return venue
 
 
-def venue_payload(venue: Venue) -> dict[str, object]:
+class AccountDirectory:
+    """Cached Gmail account lookups so one page load does not query per row."""
+
+    def __init__(self, emails: dict[int, str], preferred_account_id: int | None):
+        self.emails = emails
+        self.preferred_account_id = preferred_account_id
+
+    @classmethod
+    def load(cls, session: Session) -> "AccountDirectory":
+        emails = {
+            account.id: account.email
+            for account in session.scalars(select(GoogleAccount)).all()
+        }
+        preferred_email = get_settings().google_primary_email.strip().casefold()
+        preferred_id = next(
+            (
+                account_id
+                for account_id, email in emails.items()
+                if email.casefold() == preferred_email
+            ),
+            None,
+        ) if preferred_email else None
+        return cls(emails, preferred_id)
+
+    def email_for(self, account_id: int | None) -> str | None:
+        if account_id is None:
+            return None
+        return self.emails.get(account_id)
+
+
+def _fallback_directory() -> AccountDirectory:
+    with SessionLocal() as session:
+        return AccountDirectory.load(session)
+
+
+def _item_time(item: "Message | Outreach") -> datetime:
+    return item.occurred_at if isinstance(item, Message) else item.sent_at
+
+
+def venue_payload(
+    venue: Venue,
+    accounts: AccountDirectory | None = None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    """Summarize one venue for the queue: derived state, no full email bodies."""
+    accounts = accounts or _fallback_directory()
     first_outreach = min(
         venue.outreach, key=lambda item: item.sent_at, default=None
     )
@@ -309,14 +379,28 @@ def venue_payload(venue: Venue) -> dict[str, object]:
         venue.outreach, key=lambda item: item.sent_at, default=None
     )
     inbound = [item for item in venue.messages if item.direction == "inbound"]
+    outbound = [item for item in venue.messages if item.direction == "outbound"]
     latest_reply = max(inbound, key=lambda item: item.occurred_at, default=None)
-    activity_times = [
+    outbound_times = [
         *[item.sent_at for item in venue.outreach],
-        *[item.occurred_at for item in venue.messages],
+        *[item.occurred_at for item in outbound],
     ]
+    latest_outbound_at = max(outbound_times, default=None)
+    reminders = [item for item in outbound if item.kind == "reminder"]
+    last_reminder = max(reminders, key=lambda item: item.occurred_at, default=None)
+    activity_times = [*outbound_times, *[item.occurred_at for item in inbound]]
     latest_activity = max(activity_times, default=None)
-    gmail_item = _preferred_gmail_item(venue, latest_reply, latest_outreach)
+    gmail_item = _preferred_gmail_item(venue, latest_reply, latest_outreach, accounts)
     gmail_thread_id = gmail_item.gmail_thread_id if gmail_item else None
+    state = derive_state(
+        status=venue.status or "",
+        decision=venue.decision or "",
+        latest_inbound_at=latest_reply.occurred_at if latest_reply else None,
+        latest_outbound_at=latest_outbound_at,
+        last_reminder_at=last_reminder.occurred_at if last_reminder else None,
+        visit_at=venue.visit_at,
+        now=now,
+    )
     return {
         "id": venue.id,
         "name": venue.name,
@@ -327,6 +411,7 @@ def venue_payload(venue: Venue) -> dict[str, object]:
         "phone": venue.phone,
         "vibe": venue.vibe,
         "guest_capacity": venue.guest_capacity,
+        "availability": venue.availability or "",
         "notes": venue.notes,
         "research_source_type": venue.research_source_type,
         "research_source_url": venue.research_source_url,
@@ -337,18 +422,33 @@ def venue_payload(venue: Venue) -> dict[str, object]:
             if venue.research_updated_at else None
         ),
         "status": venue.status,
+        "decision": venue.decision or "",
+        "visit_at": iso_utc(venue.visit_at) if venue.visit_at else None,
+        "stage": state.stage,
+        "stage_label": state.stage_label,
+        "plain_status": state.plain_status,
+        "next_action": state.next_action,
+        "next_action_label": state.next_action_label,
+        "attention": state.attention,
+        "waiting_days": state.waiting_days,
+        "days_since_activity": state.days_since_activity,
         "created_at": iso_utc(venue.created_at) if venue.created_at else None,
         "last_activity_at": iso_utc(latest_activity) if latest_activity else None,
         "sent_at": iso_utc(first_outreach.sent_at) if first_outreach else None,
         "responded_at": iso_utc(latest_reply.occurred_at) if latest_reply else None,
+        "last_reminder_at": (
+            iso_utc(last_reminder.occurred_at) if last_reminder else None
+        ),
+        "message_count": len(venue.messages),
+        "inbound_count": len(inbound),
         "response_summary": venue.response_summary,
         "price_minimum_eur": venue.estimate.minimum_eur if venue.estimate else None,
         "price_maximum_eur": venue.estimate.maximum_eur if venue.estimate else None,
         "price_note": venue.estimate.note if venue.estimate else "",
-        "gmail_url": _gmail_url(gmail_thread_id, gmail_item, None),
-        "gmail_account_email": _gmail_account_email(gmail_item),
+        "gmail_url": _gmail_url(gmail_thread_id, gmail_item, None, accounts),
+        "gmail_account_email": _gmail_account_email(gmail_item, accounts),
         "documents": [
-            attachment_payload(item)
+            attachment_payload(item, accounts)
             for item in sorted(
                 venue.attachments,
                 key=lambda attachment: attachment.message.occurred_at,
@@ -358,8 +458,71 @@ def venue_payload(venue: Venue) -> dict[str, object]:
     }
 
 
-def attachment_payload(attachment: Attachment) -> dict[str, object]:
+def _snippet(value: str, limit: int = 140) -> str:
+    """Return the first useful line of our own outbound text, shortened."""
+    for raw_line in value.splitlines():
+        line = raw_line.strip()
+        if line and not line.casefold().startswith(("buongiorno", "gentile", "salve")):
+            return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
+    return ""
+
+
+def message_payload(
+    message: Message, accounts: AccountDirectory | None = None
+) -> dict[str, object]:
+    """Describe one message for the timeline without exposing venue bodies.
+
+    Inbound messages expose only their English synthesis; outbound messages
+    (written by the couple) expose a short first-line snippet.
+    """
+    accounts = accounts or _fallback_directory()
+    inbound = message.direction == "inbound"
+    return {
+        "id": message.id,
+        "direction": message.direction,
+        "kind": message.kind or "",
+        "occurred_at": iso_utc(message.occurred_at),
+        "subject": message.subject,
+        "summary": (
+            message.synthesized_summary if inbound else _snippet(message.body or "")
+        ),
+        "sender_email": message.sender_email or "" if inbound else "",
+        "gmail_account_email": _gmail_account_email(message, accounts),
+        "gmail_url": _gmail_url(message.gmail_thread_id, message, None, accounts),
+        "documents": [
+            attachment_payload(item, accounts)
+            for item in sorted(message.attachments, key=lambda item: item.id)
+        ],
+    }
+
+
+def venue_detail_payload(
+    session: Session, venue: Venue, *, now: datetime | None = None
+) -> dict[str, object]:
+    """Return the full dossier for one venue: summary plus a message timeline."""
+    accounts = AccountDirectory.load(session)
+    payload = venue_payload(venue, accounts, now=now)
+    payload["messages"] = [
+        message_payload(item, accounts)
+        for item in sorted(venue.messages, key=lambda item: item.occurred_at, reverse=True)
+    ]
+    payload["outreach"] = [
+        {
+            "id": item.id,
+            "sent_at": iso_utc(item.sent_at),
+            "gmail_account_email": accounts.email_for(item.gmail_account_id),
+            "gmail_url": _gmail_url(item.gmail_thread_id, item, None, accounts),
+        }
+        for item in sorted(venue.outreach, key=lambda item: item.sent_at, reverse=True)
+    ]
+    return payload
+
+
+def attachment_payload(
+    attachment: Attachment, accounts: AccountDirectory | None = None
+) -> dict[str, object]:
     """Expose document metadata while keeping the private object key secret."""
+    accounts = accounts or _fallback_directory()
     message = attachment.message
     return {
         "id": attachment.id,
@@ -367,11 +530,12 @@ def attachment_payload(attachment: Attachment) -> dict[str, object]:
         "content_type": attachment.content_type,
         "byte_size": attachment.byte_size,
         "source": attachment.source,
+        "has_text": bool(attachment.extracted_text),
         "subject": message.subject,
         "received_at": iso_utc(message.occurred_at),
         "view_url": f"/api/documents/{attachment.id}/view",
-        "gmail_url": _gmail_url(message.gmail_thread_id, message, None),
-        "gmail_account_email": _gmail_account_email(message),
+        "gmail_url": _gmail_url(message.gmail_thread_id, message, None, accounts),
+        "gmail_account_email": _gmail_account_email(message, accounts),
     }
 
 
@@ -379,16 +543,20 @@ def _gmail_url(
     thread_id: str | None,
     latest_reply: Message | None,
     latest_outreach: Outreach | None,
+    accounts: AccountDirectory | None = None,
 ) -> str | None:
     if thread_id is None:
         return None
     item = latest_reply or latest_outreach
     auth_user: str | None = None
     if item is not None and item.gmail_account_id is not None:
-        with SessionLocal() as session:
-            account = session.get(GoogleAccount, item.gmail_account_id)
-            if account is not None:
-                auth_user = account.email
+        if accounts is not None:
+            auth_user = accounts.email_for(item.gmail_account_id)
+        else:
+            with SessionLocal() as session:
+                account = session.get(GoogleAccount, item.gmail_account_id)
+                if account is not None:
+                    auth_user = account.email
     encoded_thread_id = quote(thread_id, safe="")
     if auth_user is None:
         return f"https://mail.google.com/mail/#all/{encoded_thread_id}"
@@ -402,9 +570,13 @@ def _gmail_url(
     )
 
 
-def _gmail_account_email(item: Message | Outreach | None) -> str | None:
+def _gmail_account_email(
+    item: Message | Outreach | None, accounts: AccountDirectory | None = None
+) -> str | None:
     if item is None or item.gmail_account_id is None:
         return None
+    if accounts is not None:
+        return accounts.email_for(item.gmail_account_id)
     with SessionLocal() as session:
         account = session.get(GoogleAccount, item.gmail_account_id)
         return account.email if account else None
@@ -414,15 +586,11 @@ def _preferred_gmail_item(
     venue: Venue,
     latest_reply: Message | None,
     latest_outreach: Outreach | None,
+    accounts: AccountDirectory | None = None,
 ) -> Message | Outreach | None:
     """Prefer a thread owned by the configured sender when the venue has one."""
-    preferred_email = get_settings().google_primary_email.strip().casefold()
-    preferred_account_id: int | None = None
-    if preferred_email:
-        with SessionLocal() as session:
-            preferred_account_id = session.scalar(
-                select(GoogleAccount.id).where(GoogleAccount.email == preferred_email)
-            )
+    accounts = accounts or _fallback_directory()
+    preferred_account_id = accounts.preferred_account_id
     items: list[Message | Outreach] = [*venue.messages, *venue.outreach]
     if preferred_account_id is not None:
         preferred = [
@@ -430,18 +598,28 @@ def _preferred_gmail_item(
             if item.gmail_account_id == preferred_account_id
         ]
         if preferred:
-            return max(
-                preferred,
-                key=lambda item: (
-                    item.occurred_at if isinstance(item, Message) else item.sent_at
-                ),
-            )
+            return max(preferred, key=_item_time)
     return latest_reply or latest_outreach
 
 
-def list_venues(session: Session) -> list[dict[str, object]]:
+def list_venues(
+    session: Session, *, now: datetime | None = None
+) -> list[dict[str, object]]:
+    accounts = AccountDirectory.load(session)
     venues = session.scalars(select(Venue).order_by(Venue.name)).unique().all()
-    return sort_venue_payloads([venue_payload(venue) for venue in venues])
+    return sort_venue_payloads([venue_payload(venue, accounts, now=now) for venue in venues])
+
+
+def queue_summary(venues: list[dict[str, object]]) -> dict[str, object]:
+    """Count venues per stage so the home screen can show a one-line overview."""
+    counts = {stage: 0 for stage in STAGE_ORDER}
+    for venue in venues:
+        counts[str(venue["stage"])] = counts.get(str(venue["stage"]), 0) + 1
+    return {
+        "total": len(venues),
+        "by_stage": counts,
+        "attention": sum(1 for venue in venues if venue["attention"]),
+    }
 
 
 def dashboard_payload(session: Session) -> dict[str, object]:
@@ -461,8 +639,10 @@ def dashboard_payload(session: Session) -> dict[str, object]:
     state = session.get(SystemState, LAST_REFRESH_KEY)
     return {
         "venues": venues,
+        "queue": queue_summary(venues),
         "last_refreshed_at": state.value if state else None,
         "sync_status": sync_status_payload(session),
+        "preferences": preferences_payload(session),
         "price_overview": {
             "venue_count": len(priced),
             "average_eur": round(sum(midpoints) / len(midpoints)) if midpoints else None,
@@ -476,6 +656,21 @@ def dashboard_payload(session: Session) -> dict[str, object]:
             )) if priced else None,
         },
     }
+
+
+BUDGET_KEY = "budget_eur"
+
+
+def preferences_payload(session: Session) -> dict[str, object]:
+    """Small couple-level settings kept in SystemState (never secrets)."""
+    raw = get_system_state(session, BUDGET_KEY)
+    budget: float | None = None
+    if raw:
+        try:
+            budget = float(raw)
+        except ValueError:
+            budget = None
+    return {"budget_eur": budget, "guest_count": GUEST_COUNT}
 
 
 def sync_status_payload(session: Session) -> dict[str, object] | None:
