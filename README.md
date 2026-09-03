@@ -4,13 +4,13 @@
 
 **A private, working venue-search workspace for Kassia & Raphaël.**
 
-[Live app](https://rkwedding-az2zo.ondigitalocean.app) · [Health check](https://rkwedding-az2zo.ondigitalocean.app/health) · [Detailed architecture](docs/ARCHITECTURE.md)
+[Live app](https://rkwedding-az2zo.ondigitalocean.app) · [Product brief](docs/PRODUCT_BRIEF.md) · [Health check](https://rkwedding-az2zo.ondigitalocean.app/health) · [Detailed architecture](docs/ARCHITECTURE.md)
 
 ![Python](https://img.shields.io/badge/Python-3.12-173d2e?style=flat-square)
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-245843?style=flat-square)
 ![DigitalOcean](https://img.shields.io/badge/DigitalOcean-App_Platform-0069ff?style=flat-square)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-managed-336791?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-55_passing-dfe9df?style=flat-square&labelColor=245843)
+![Tests](https://img.shields.io/badge/tests-60_passing-dfe9df?style=flat-square&labelColor=245843)
 
 </div>
 
