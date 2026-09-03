@@ -9,6 +9,7 @@ from pydantic import SecretStr
 from app.agent import analyze_event
 from app.config import Settings
 from app.documents import extract_pdf_text
+from app.email_templates import OUTREACH_BODY, OUTREACH_SUBJECT
 from app.gmail import GmailClient
 from app.google_auth import get_google_access_token
 from app.models import GmailEvent, GmailPushNotification, VenueOutreachEvent
@@ -22,22 +23,6 @@ grazie per averci inviato il preventivo e le informazioni. Li esamineremo con at
 Cordiali saluti,
 Raphaël
 """
-
-OUTREACH_SUBJECT = "Richiesta informazioni matrimonio – Kassia e Raphaël"
-OUTREACH_BODY = """Buongiorno,
-
-mi chiamo Raphaël e sto organizzando il mio matrimonio con la mia futura moglie Kassia, previsto indicativamente tra la fine di settembre e l’inizio di ottobre, per circa 90 invitati.
-
-Siamo interessati alla vostra location e vorremmo ricevere maggiori informazioni sulla disponibilità, sui servizi offerti e sui relativi costi.
-
-Se possibile, potreste inviarci via email un preventivo o maggiori informazioni sui pacchetti e sulle opzioni disponibili?
-
-Grazie mille per la disponibilità e rimaniamo in attesa di un vostro gentile riscontro.
-
-Cordiali saluti,
-Raphaël
-"""
-
 
 @dataclass(frozen=True)
 class ProcessingResult:

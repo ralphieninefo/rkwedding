@@ -109,3 +109,10 @@ def test_client_secret_json_is_preferred_over_local_file(monkeypatch) -> None:
     assert gmail_oauth.oauth_setup_ready() is True
     assert gmail_oauth._flow(state="state") == "flow-from-json"
     assert captured["config"]["web"]["client_id"] == "hosted-client"
+
+
+def test_oauth_requests_only_gmail_scopes() -> None:
+    assert gmail_oauth.SCOPES == [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+    ]

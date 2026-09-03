@@ -35,7 +35,6 @@ flowchart TB
         OAUTH["OAuth 2.0"]
         G1["Personal Gmail"]
         G2["Shared wedding Gmail<br/>primary for new outreach"]
-        SHEET["Venue research Sheet"]
     end
 
     SITES["Public venue websites"]
@@ -53,7 +52,6 @@ flowchart TB
     JOB <--> G1
     JOB <--> G2
     WEB --> SITES
-    JOB --> SHEET
     WEB --> KIMI
     JOB --> KIMI
 ```
@@ -63,7 +61,7 @@ flowchart TB
 | Component | Runtime responsibility | Durable state? |
 |---|---|:---:|
 | `web` | UI, APIs, login, OAuth callbacks, contact discovery, preview/send actions | No |
-| `gmail-sync` | Scheduled Gmail/Sheet reconciliation and reply synthesis | No |
+| `gmail-sync` | Scheduled Gmail reconciliation, attachment mirroring, and reply synthesis | No |
 | Managed PostgreSQL | Workflow records, normalized messages, OAuth tokens, estimates, checkpoints | Yes |
 | Private Spaces bucket | Original Gmail attachment bytes mirrored for venue browsing | Yes |
 | Serverless Inference | Stateless structured reply extraction | No |
@@ -142,8 +140,7 @@ Additional `SystemState` records hold small checkpoints such as the latest succe
 PostgreSQL is authoritative for the dashboard. Gmail remains authoritative for
 complete conversation history and the original emailed attachment. Spaces is a
 private, indexed mirror of attachment bytes for convenient viewing. Google
-Sheets is a reference/import surface and may refresh non-empty venue metadata;
-it does not own runtime workflow status.
+Sheets is not part of the production workflow.
 
 ## 4. Venue onboarding and initial outreach
 
@@ -184,14 +181,12 @@ sequenceDiagram
     participant Job as gmail-sync
     participant DB as PostgreSQL
     participant Gmail as Gmail API
-    participant Sheet as Google Sheets
     participant Kimi as Kimi K3
     participant Spaces as Private Spaces
     participant UI as Dashboard
 
     Cron->>Job: Start every 15 minutes
     Job->>DB: Load connected Google accounts and venues
-    Job->>Sheet: Refresh non-empty venue metadata
     loop Each connected Gmail account
         Job->>Gmail: Search tracked addresses and known threads
         Gmail-->>Job: Normalized messages
@@ -314,7 +309,6 @@ The model cannot call Gmail or write to PostgreSQL. Invalid, timed-out, or unava
 
 - Gmail message IDs are unique in PostgreSQL, preventing duplicate ingestion.
 - Known Gmail thread IDs catch replies sent from a venue employee's personal address.
-- Metadata refresh writes only non-empty Sheet values.
 - PostgreSQL uses connection pre-ping to recover stale pooled connections.
 - `/health` is the App Platform service probe.
 - A failed inference does not lose the underlying email body.
@@ -332,7 +326,6 @@ The model cannot call Gmail or write to PostgreSQL. Invalid, timed-out, or unava
 - PostgreSQL workflow database
 - multi-account Google OAuth
 - Gmail API polling every 15 minutes
-- Google Sheets metadata refresh
 - Kimi structured response synthesis
 - private Spaces attachment mirroring and signed viewing
 

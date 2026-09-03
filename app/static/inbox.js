@@ -415,12 +415,7 @@ const checkStatus = async () => {
     gmailStatus.textContent = "Google setup needed";
     connectButton.hidden = true;
   }
-  let count = await loadVenues();
-  if (!count && status.connected && status.spreadsheet_configured) {
-    const imported = await fetch("/api/import/sheet", {method: "POST"});
-    if (imported.ok) count = await loadVenues();
-  }
-  return count;
+  return loadVenues();
 };
 
 checkStatus().catch(() => {

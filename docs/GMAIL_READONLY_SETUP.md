@@ -1,4 +1,8 @@
-# Connect Google to the local control center
+# Archived prototype: local Google connection
+
+> This document describes an abandoned Sheet-first prototype. It is retained
+> only for historical context and must not be used to configure production.
+> Follow `docs/PRODUCT_BRIEF.md` and `docs/ARCHITECTURE.md` instead.
 
 The control center asks for Gmail read/send access plus Google Sheets access.
 It reads replies, sends the approved outreach when a row is explicitly marked

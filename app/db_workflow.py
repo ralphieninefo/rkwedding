@@ -1,4 +1,4 @@
-"""Sheet import, Gmail reconciliation, and concise response synthesis."""
+"""Gmail reconciliation and concise database-backed response synthesis."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -21,26 +21,13 @@ from app.database import (
     set_system_state,
     upsert_venue,
 )
+from app.email_templates import FOLLOWUP_BODY, OUTREACH_BODY, OUTREACH_SUBJECT
 from app.gmail import GmailClient, GmailMessage
 from app.gmail_oauth import default_google_account_id, list_google_accounts
 from app.google_auth import get_google_access_token
 from app.inference import DigitalOceanInferenceClient, InvalidInferenceResponseError
 from app.models import ResponseSynthesis
-from app.sheets import GoogleSheetsClient
 from app.storage import AttachmentTooLargeError, SpacesStorage
-from app.workflow import OUTREACH_BODY, OUTREACH_SUBJECT
-
-
-FOLLOWUP_BODY = """Buongiorno,
-
-grazie mille per le informazioni e per il preventivo. Stiamo confrontando le opzioni e avremmo piacere di approfondire disponibilità, servizi inclusi ed eventuali costi aggiuntivi per circa 90 invitati.
-
-Potreste indicarci anche le prossime disponibilità per una visita alla location?
-
-Grazie ancora.
-
-Cordiali saluti,
-Raphaël e Kasia"""
 
 
 def _addresses(value: str) -> set[str]:
@@ -69,72 +56,6 @@ def _is_incoming(
             or message.thread_id in known_thread_ids
         )
     )
-
-
-async def import_sheet_venues(settings: Settings) -> dict[str, int]:
-    """Copy valid venue contacts from the existing Sheet into the app database."""
-    if not settings.google_spreadsheet_id:
-        raise ValueError("Google Sheet is not configured.")
-    account_id = default_google_account_id()
-    token = await get_google_access_token(settings, account_id)
-    sheets = GoogleSheetsClient(token, settings.google_spreadsheet_id)
-    rows = await sheets.get_rows(settings.google_venues_sheet)
-    imported = skipped = 0
-    with SessionLocal() as session:
-        for row in rows:
-            email = row.get("Email", "").strip()
-            if "@" not in email or " " in email:
-                skipped += 1
-                continue
-            upsert_venue(
-                session,
-                name=row.get("Venue", email),
-                email=email,
-                region=row.get("Region", "") or row.get("Location", ""),
-                location=row.get("Location", ""),
-                website=row.get("Website", ""),
-                phone=row.get("Phone", ""),
-                vibe=row.get("Vibe", ""),
-                guest_capacity=row.get("Guest Capacity", ""),
-                notes=row.get("Notes", ""),
-            )
-            imported += 1
-    return {"imported": imported, "skipped": skipped}
-
-
-async def refresh_existing_venue_metadata(settings: Settings) -> int:
-    """Refresh reference fields for tracked venues without importing new rows."""
-    if not settings.google_spreadsheet_id:
-        return 0
-    account_id = default_google_account_id()
-    token = await get_google_access_token(settings, account_id)
-    rows = await GoogleSheetsClient(
-        token, settings.google_spreadsheet_id
-    ).get_rows(settings.google_venues_sheet)
-    refreshed = 0
-    with SessionLocal() as session:
-        for row in rows:
-            email = row.get("Email", "").strip().casefold()
-            if not email:
-                continue
-            venue = session.scalar(select(Venue).where(Venue.email == email))
-            if venue is None:
-                continue
-            fields = {
-                "region": row.get("Region", ""),
-                "location": row.get("Location", ""),
-                "website": row.get("Website", ""),
-                "phone": row.get("Phone", ""),
-                "vibe": row.get("Vibe", ""),
-                "guest_capacity": row.get("Guest Capacity", ""),
-                "notes": row.get("Notes", ""),
-            }
-            for field, value in fields.items():
-                if value.strip():
-                    setattr(venue, field, value.strip())
-            refreshed += 1
-        session.commit()
-    return refreshed
 
 
 async def create_venue_and_optionally_send(
@@ -530,7 +451,6 @@ async def reconcile_gmail_database(
     accounts = list_google_accounts()
     if not accounts:
         raise FileNotFoundError("No Google OAuth credential is stored in the database.")
-    metadata_refreshed = await refresh_existing_venue_metadata(settings)
     totals = {
         "new_messages": 0,
         "sent_confirmed": 0,
@@ -552,7 +472,6 @@ async def reconcile_gmail_database(
         set_system_state(session, "gmail_last_refresh", iso_utc(refreshed_at))
     return {
         **totals,
-        "metadata_refreshed": metadata_refreshed,
         "accounts_synced": synced_accounts,
         "last_refreshed_at": iso_utc(refreshed_at),
     }

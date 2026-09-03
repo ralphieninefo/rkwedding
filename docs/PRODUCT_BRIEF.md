@@ -34,6 +34,18 @@ agent platform, a CRM product, or a multi-tenant application.
 
 ## The golden workflow
 
+### Product surfaces
+
+- **Dashboard:** the active correspondence list. It shows compact, actionable
+  Gmail-derived state—who was contacted, the latest brief English summary, the
+  current step, and controls to preview/reply or open the correct Gmail thread.
+- **Venues:** the durable reference directory. Each venue shows its accumulated
+  summary, contact/research details, pricing and capacity, correspondence
+  provenance, and mirrored assets with **View** and **Open in Gmail** actions.
+
+Both surfaces are database-backed views of the same records. Neither reads from
+Google Sheets, and neither needs a live Gmail request in order to render.
+
 ### 1. Open the dashboard
 
 The user signs into the control center and immediately sees the last committed
@@ -113,7 +125,6 @@ and update time. It must not be represented as an official venue response.
 | Venue records, status, summaries, estimates, checkpoints | PostgreSQL | Drives both application pages. |
 | Original conversations and attachments | Gmail | Remains the canonical communication record. |
 | Convenient attachment copy | Private Spaces bucket | One bucket, logically partitioned with venue/message key prefixes. |
-| Existing venue research | Google Sheets | Optional import/metadata refresh; never runtime workflow state. |
 | English summaries and price fields | Kimi via DO Serverless Inference | Derived, validated, replaceable data with graceful fallback. |
 | Public contact details | Venue website | Suggested for human review before saving. |
 
@@ -144,7 +155,7 @@ safe reprocessing of the same Gmail data.
 - Spaces remains private; document access uses short-lived signed URLs after app
   authentication.
 - Gmail message IDs and attachment source IDs provide idempotency.
-- Partial Gmail, Kimi, Sheet, or Spaces failures do not erase committed venue
+- Partial Gmail, Kimi, or Spaces failures do not erase committed venue
   data or prevent the dashboard from loading.
 - Gmail API rate limits and transient failures receive bounded retries and a
   useful user-facing error.
@@ -152,7 +163,8 @@ safe reprocessing of the same Gmail data.
 ## Explicit non-goals
 
 - No Google Pub/Sub requirement for this workload; scheduled polling is enough.
-- No spreadsheet-driven send trigger or spreadsheet as backend database.
+- No Google Sheets integration, spreadsheet trigger, import, or spreadsheet as
+  backend database. Venue information is entered and maintained in the app.
 - No autonomous email sending or AI-controlled business decisions.
 - No bucket per venue.
 - No OCR or vision processing by default. Users can inspect scanned documents.

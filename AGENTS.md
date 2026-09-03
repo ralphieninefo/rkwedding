@@ -9,8 +9,8 @@ It is the source of truth for the intended user workflow and scope.
   not a multi-tenant SaaS product or an autonomous outreach agent.
 - Managed PostgreSQL is the application source of truth. Gmail owns the
   original conversations, and one private Spaces bucket mirrors attachments.
-- Google Sheets is a secondary import/reference source. Do not move runtime
-  workflow state back into Sheets.
+- Google Sheets is outside the canonical product. Do not add Sheet imports,
+  refreshes, triggers, scopes, or workflow state to the active path.
 - App Platform services and jobs are stateless. Never store required state,
   OAuth tokens, or documents in the container filesystem.
 - New inquiries use `GOOGLE_PRIMARY_EMAIL`. Replies must use the Google account
@@ -30,6 +30,7 @@ The canonical production path is:
 - `app/main.py`: authenticated HTTP/UI boundary
 - `app/database.py`: durable models and UI projections
 - `app/db_workflow.py`: database-backed outreach, reconciliation, and replies
+- `app/email_templates.py`: exact human-reviewed outbound copy
 - `app/gmail_oauth.py`, `app/gmail.py`: multi-account OAuth and Gmail API
 - `app/scheduled_sync.py`: 15-minute production reconciliation entry point
 - `app/storage.py`: private Spaces attachment mirror

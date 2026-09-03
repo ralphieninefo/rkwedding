@@ -27,14 +27,6 @@ services:
         value: ${rkwedding.DATABASE_URL}
         scope: RUN_TIME
         type: SECRET
-      - key: GOOGLE_SPREADSHEET_ID
-        value: 1CTQ7ochPaQS3ZMREeWDZDyiRcBw_hqyUN_eyrwbHxS0
-        scope: RUN_TIME
-        type: GENERAL
-      - key: GOOGLE_VENUES_SHEET
-        value: Venues
-        scope: RUN_TIME
-        type: GENERAL
       # Paste the complete OAuth client JSON as an encrypted value in the UI.
       - key: GOOGLE_CLIENT_SECRET_JSON
         value: ""

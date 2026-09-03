@@ -1,4 +1,8 @@
-# DigitalOcean Setup
+# Archived prototype: DigitalOcean setup
+
+> This document contains obsolete Sheet/Pub/Sub deployment instructions. It is
+> retained only for historical context. Use `.do/app.yaml`, `README.md`, and
+> `docs/ARCHITECTURE.md` for the active production deployment.
 
 The repository can run locally without `doctl`. DigitalOcean terminal or MCP access is needed only when you are ready to inspect models, create the App Platform app, configure secrets, or view deployment logs.
 

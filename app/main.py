@@ -190,7 +190,6 @@ async def gmail_status() -> dict[str, object]:
         "oauth_setup_ready": oauth_setup_ready(),
         "connected": gmail_connected(),
         "accounts": list_google_accounts(),
-        "spreadsheet_configured": bool(get_settings().google_spreadsheet_id),
     }
 
 
@@ -264,7 +263,7 @@ async def tracked_responses() -> dict[str, object]:
 
 
 @app.get("/api/venues")
-async def sheet_venues() -> dict[str, object]:
+async def venues_api() -> dict[str, object]:
     """Return database-backed venue status without exposing full email bodies."""
     from app.database import SessionLocal, dashboard_payload
 
@@ -354,19 +353,6 @@ async def preview_venue_outreach(venue_id: int) -> dict[str, object]:
         return outreach_preview(venue_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@app.post("/api/import/sheet")
-async def import_existing_sheet() -> dict[str, int]:
-    """Copy valid venue contacts into the database; never modify the Sheet."""
-    from app.db_workflow import import_sheet_venues
-
-    try:
-        return await import_sheet_venues(get_settings())
-    except (FileNotFoundError, ValueError) as exc:
-        raise HTTPException(status_code=401, detail="Connect Google first.") from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail="Could not read the venue Sheet.") from exc
 
 
 @app.post("/api/venues/discover", response_model=VenueDiscovery)
@@ -505,6 +491,8 @@ async def scheduled_reconciliation(
 @app.get("/health")
 async def health() -> dict[str, str]:
     """Return a lightweight readiness response."""
+    from app.gmail_oauth import gmail_connected, oauth_setup_ready
+
     settings = get_settings()
     return {
         "status": "ok",
@@ -516,7 +504,10 @@ async def health() -> dict[str, str]:
             if settings.google_pubsub_verification_token
             else "local_only"
         ),
-        "google_api": "configured" if settings.google_configured else "not_configured",
+        "google_oauth_client": (
+            "configured" if oauth_setup_ready() else "not_configured"
+        ),
+        "gmail_accounts": "connected" if gmail_connected() else "not_connected",
         "document_storage": (
             "configured" if settings.spaces_configured else "not_configured"
         ),

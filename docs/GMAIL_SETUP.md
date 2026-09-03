@@ -1,4 +1,8 @@
-# Google Sheets, Gmail, and Pub/Sub Setup
+# Archived prototype: Google Sheets, Gmail, and Pub/Sub
+
+> This document describes an abandoned Sheet-first prototype. It is retained
+> only for historical context and must not be used to configure production.
+> Follow `docs/PRODUCT_BRIEF.md` and `docs/ARCHITECTURE.md` instead.
 
 The code is ready for Google credentials, but no real account or secret is stored in Git.
 

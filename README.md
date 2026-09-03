@@ -10,7 +10,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-245843?style=flat-square)
 ![DigitalOcean](https://img.shields.io/badge/DigitalOcean-App_Platform-0069ff?style=flat-square)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-managed-336791?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-60_passing-dfe9df?style=flat-square&labelColor=245843)
+![Tests](https://img.shields.io/badge/tests-61_passing-dfe9df?style=flat-square&labelColor=245843)
 
 </div>
 
@@ -44,13 +44,11 @@ flowchart LR
     U["Kassia & Raphaël<br/>Browser"] -->|HTTPS + signed session| W["FastAPI web service<br/>DigitalOcean App Platform"]
     W -->|read/write workflow state| DB[("Managed PostgreSQL<br/>source of truth")]
     W -->|OAuth 2.0 + Gmail API| G["Connected Gmail accounts"]
-    W -->|metadata refresh| S["Google Sheet<br/>reference metadata"]
     W -->|structured extraction| K["DO Serverless Inference<br/>Kimi K3"]
     W -->|public contact discovery| V["Venue websites"]
 
     J["Scheduled sync job<br/>every 15 minutes"] --> DB
     J --> G
-    J --> S
     J --> K
 ```
 
@@ -65,8 +63,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for data ownership, sequence di
 | Venues and workflow state | PostgreSQL | Drives both app pages and all statuses. |
 | OAuth tokens and account ownership | PostgreSQL | Never sent to the browser. |
 | Full email threads | Gmail | PostgreSQL stores normalized copies needed for tracking and synthesis. |
-| Venue research metadata | PostgreSQL | Google Sheet fields may refresh non-empty metadata. |
-| Existing research spreadsheet | Google Sheets | Reference/import surface, not the runtime workflow database. |
+| Venue research metadata | PostgreSQL | Entered and maintained through the application. |
 | English summaries and price estimates | PostgreSQL | Derived by Kimi from stored inbound messages. |
 
 ## Product surfaces
@@ -89,7 +86,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for data ownership, sequence di
 - Duplicate Gmail message IDs are ignored, making reconciliation safe to rerun.
 - Sending always requires an explicit human click; the sync worker never sends email.
 
-Google OAuth grants the app Gmail read/send and Sheets access. Google Pub/Sub is not part of the active production ingestion path.
+Google OAuth grants the app Gmail read/send access. Google Sheets and Pub/Sub are not part of the active production path.
 
 ## AI boundary
 
@@ -139,8 +136,6 @@ Keep local credentials in `.env`. Never commit `.env`, OAuth client JSON, refres
 | `GOOGLE_CLIENT_SECRET_JSON` | Secret | Complete web OAuth client configuration in production. |
 | `GOOGLE_ALLOWED_EMAILS` | General | Comma-separated Gmail accounts allowed to connect. |
 | `GOOGLE_PRIMARY_EMAIL` | General | Connected account used for new inquiries. |
-| `GOOGLE_SPREADSHEET_ID` | General | Existing wedding venue spreadsheet. |
-| `GOOGLE_VENUES_SHEET` | General | Metadata tab; defaults to `Venues`. |
 | `DIGITALOCEAN_MODEL_ACCESS_KEY` | Secret | Serverless Inference credential. |
 | `DIGITALOCEAN_MODEL_ID` | General | Exact deployed model identifier. |
 | `DIGITALOCEAN_INFERENCE_BASE_URL` | General | Serverless Inference API base URL. |
@@ -159,7 +154,7 @@ Keep local credentials in `.env`. Never commit `.env`, OAuth client JSON, refres
 app/
 ├── main.py             HTTP routes, auth boundary, and UI entry points
 ├── database.py         PostgreSQL/SQLite models and dashboard projections
-├── db_workflow.py      Sending, Gmail reconciliation, Sheets refresh, replies
+├── db_workflow.py      Sending, Gmail reconciliation, synthesis, and replies
 ├── discovery.py        Safe public website contact/address discovery
 ├── gmail.py            Gmail API client and message normalization
 ├── gmail_oauth.py      Multi-account OAuth and database-backed tokens
