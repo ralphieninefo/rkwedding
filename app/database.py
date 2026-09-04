@@ -25,6 +25,7 @@ from sqlalchemy.orm import (
     Session,
     mapped_column,
     relationship,
+    selectinload,
     sessionmaker,
 )
 
@@ -606,7 +607,16 @@ def list_venues(
     session: Session, *, now: datetime | None = None
 ) -> list[dict[str, object]]:
     accounts = AccountDirectory.load(session)
-    venues = session.scalars(select(Venue).order_by(Venue.name)).unique().all()
+    venues = session.scalars(
+        select(Venue)
+        .order_by(Venue.name)
+        .options(
+            selectinload(Venue.messages).selectinload(Message.attachments),
+            selectinload(Venue.outreach),
+            selectinload(Venue.attachments),
+            selectinload(Venue.estimate),
+        )
+    ).unique().all()
     return sort_venue_payloads([venue_payload(venue, accounts, now=now) for venue in venues])
 
 
