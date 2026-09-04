@@ -244,8 +244,11 @@ async def delete_venue_api(venue_id: int) -> dict[str, object]:
 async def preferences_api() -> dict[str, object]:
     from app.database import SessionLocal, preferences_payload
 
-    with SessionLocal() as session:
-        return preferences_payload(session)
+    def _load() -> dict[str, object]:
+        with SessionLocal() as session:
+            return preferences_payload(session)
+
+    return await run_in_threadpool(_load)
 
 
 @app.patch("/api/preferences")
@@ -263,11 +266,14 @@ async def gmail_status() -> dict[str, object]:
         oauth_setup_ready,
     )
 
-    return {
-        "oauth_setup_ready": oauth_setup_ready(),
-        "connected": gmail_connected(),
-        "accounts": list_google_accounts(),
-    }
+    def _load() -> dict[str, object]:
+        return {
+            "oauth_setup_ready": oauth_setup_ready(),
+            "connected": gmail_connected(),
+            "accounts": list_google_accounts(),
+        }
+
+    return await run_in_threadpool(_load)
 
 
 @app.get("/auth/google/start")
@@ -344,8 +350,11 @@ async def venues_api() -> dict[str, object]:
     """Return database-backed venue status without exposing full email bodies."""
     from app.database import SessionLocal, dashboard_payload
 
-    with SessionLocal() as session:
-        return dashboard_payload(session)
+    def _load() -> dict[str, object]:
+        with SessionLocal() as session:
+            return dashboard_payload(session)
+
+    return await run_in_threadpool(_load)
 
 
 @app.get("/api/documents/{document_id}/view")
@@ -650,6 +659,11 @@ async def health() -> dict[str, str]:
     from app.gmail_oauth import gmail_connected, oauth_setup_ready
 
     settings = get_settings()
+
+    def _oauth_state() -> tuple[bool, bool]:
+        return oauth_setup_ready(), gmail_connected()
+
+    oauth_ready, accounts_connected = await run_in_threadpool(_oauth_state)
     return {
         "status": "ok",
         "inference": (
@@ -661,9 +675,9 @@ async def health() -> dict[str, str]:
             else "local_only"
         ),
         "google_oauth_client": (
-            "configured" if oauth_setup_ready() else "not_configured"
+            "configured" if oauth_ready else "not_configured"
         ),
-        "gmail_accounts": "connected" if gmail_connected() else "not_connected",
+        "gmail_accounts": "connected" if accounts_connected else "not_connected",
         "document_storage": (
             "configured" if settings.spaces_configured else "not_configured"
         ),
