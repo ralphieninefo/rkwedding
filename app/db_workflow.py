@@ -8,7 +8,7 @@ from email.utils import getaddresses, parseaddr
 import httpx
 from botocore.exceptions import BotoCoreError, ClientError
 from google.auth.exceptions import GoogleAuthError
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.config import Settings
@@ -1082,6 +1082,11 @@ def update_venue(venue_id: int, **fields: object) -> dict[str, object]:
         if isinstance(decision, str):
             if decision not in DECISIONS:
                 raise ValueError("Unknown decision.")
+            if decision == "shortlisted" and venue.decision != "shortlisted":
+                highest = session.scalar(select(func.max(Venue.shortlist_rank)))
+                venue.shortlist_rank = (highest or 0) + 1
+            elif decision != "shortlisted":
+                venue.shortlist_rank = None
             venue.decision = decision
         visit = fields.get("visit_at")
         if isinstance(visit, str):
@@ -1089,6 +1094,40 @@ def update_venue(venue_id: int, **fields: object) -> dict[str, object]:
                 venue.visit_at = _parse_visit(visit)
             except ValueError as exc:
                 raise ValueError("Enter the visit as a date, e.g. 2026-10-12.") from exc
+        session.commit()
+        return venue_detail_payload(session, venue)
+
+
+def move_shortlisted(venue_id: int, direction: str) -> dict[str, object]:
+    """Move a shortlisted venue one place up or down in the couple's ranking."""
+    if direction not in {"up", "down"}:
+        raise ValueError("Direction must be 'up' or 'down'.")
+    with SessionLocal() as session:
+        venue = session.get(Venue, venue_id)
+        if venue is None:
+            raise ValueError("Venue not found.")
+        if venue.decision != "shortlisted":
+            raise ValueError("Only shortlisted venues can be reordered.")
+        ranked = list(
+            session.scalars(select(Venue).where(Venue.decision == "shortlisted"))
+        )
+        ranked.sort(
+            key=lambda item: (
+                item.shortlist_rank is None,
+                item.shortlist_rank or 0,
+                item.id,
+            )
+        )
+        # Normalize to a dense 1..n ranking so swaps are always well defined.
+        for position, item in enumerate(ranked, start=1):
+            item.shortlist_rank = position
+        index = next(i for i, item in enumerate(ranked) if item.id == venue_id)
+        neighbour = index - 1 if direction == "up" else index + 1
+        if 0 <= neighbour < len(ranked):
+            ranked[index].shortlist_rank, ranked[neighbour].shortlist_rank = (
+                ranked[neighbour].shortlist_rank,
+                ranked[index].shortlist_rank,
+            )
         session.commit()
         return venue_detail_payload(session, venue)
 

@@ -31,7 +31,7 @@ const STAGES = [
   {key: "reply_needed", title: "Reply needed", hint: "They answered — read the summary and reply."},
   {key: "waiting", title: "Waiting on venue", hint: "Inquiry sent; a reminder is suggested after a week."},
   {key: "draft", title: "Not contacted yet", hint: "Saved venues that still need the first inquiry."},
-  {key: "shortlist", title: "Shortlist", hint: "Venues you like; compare them on the All venues page."},
+  {key: "shortlist", title: "Shortlist", hint: "Your ranked favourites — use ▲ and ▼ to reorder."},
   {key: "closed", title: "Closed", hint: "Passed or not available."},
 ];
 
@@ -86,7 +86,11 @@ const filteredVenues = () => {
 };
 
 const sortForStage = (venues, stage) => venues.slice().sort((left, right) => {
-  if (stage === "waiting" || stage === "shortlist") {
+  if (stage === "shortlist") {
+    return (left.shortlist_rank ?? Infinity) - (right.shortlist_rank ?? Infinity)
+      || (left.id - right.id);
+  }
+  if (stage === "waiting") {
     return (right.waiting_days ?? -1) - (left.waiting_days ?? -1);
   }
   if (stage === "reply_needed") {
@@ -140,7 +144,9 @@ const renderCard = (venue) => {
   title.className = "card-title";
   title.href = `/venues/${venue.id}`;
   const name = document.createElement("strong");
-  name.textContent = venue.name;
+  name.textContent = venue.stage === "shortlist" && venue.shortlist_rank
+    ? `#${venue.shortlist_rank} · ${venue.name}`
+    : venue.name;
   const place = document.createElement("small");
   place.textContent = [venue.region, venue.location].filter(Boolean).join(" · ") || "Region not added";
   title.append(name, place);
@@ -218,6 +224,27 @@ const renderCard = (venue) => {
     actions.append(primaryButton("Send reminder", (button) => openReminderPreview(venue, button)));
   } else if (venue.next_action === "pass") {
     actions.append(secondaryButton("Mark as passed", (button) => setDecision(venue, "passed", button)));
+  }
+  if (venue.stage === "shortlist") {
+    const move = (direction) => (button) => withBusy(button, "…", async () => {
+      try {
+        await api(`/api/venues/${venue.id}/shortlist-move`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({direction}),
+        });
+        await loadVenues();
+      } catch (error) {
+        showMessage(error.message, "error");
+      }
+    });
+    const up = secondaryButton("▲", move("up"), "button button-secondary button-small");
+    up.title = "Move up in the ranking";
+    up.setAttribute("aria-label", `Move ${venue.name} up`);
+    const down = secondaryButton("▼", move("down"), "button button-secondary button-small");
+    down.title = "Move down in the ranking";
+    down.setAttribute("aria-label", `Move ${venue.name} down`);
+    actions.append(up, down);
   }
   const links = document.createElement("div");
   links.className = "card-links";

@@ -77,6 +77,8 @@ class Venue(Base):
     status: Mapped[str] = mapped_column(String(50), default="Draft")
     # The couple's own decision: "", "shortlisted", or "passed".
     decision: Mapped[str] = mapped_column(String(30), default="")
+    # 1 = favourite; only meaningful while decision == "shortlisted".
+    shortlist_rank: Mapped[int | None] = mapped_column(nullable=True)
     visit_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -256,6 +258,7 @@ def init_database() -> None:
         "research_notes": "TEXT DEFAULT ''",
         "research_updated_at": "TIMESTAMP NULL",
         "decision": "VARCHAR(30) DEFAULT ''",
+        "shortlist_rank": "INTEGER NULL",
         "visit_at": "TIMESTAMP NULL",
         "availability": "VARCHAR(500) DEFAULT ''",
     }
@@ -424,6 +427,7 @@ def venue_payload(
         ),
         "status": venue.status,
         "decision": venue.decision or "",
+        "shortlist_rank": venue.shortlist_rank,
         "visit_at": iso_utc(venue.visit_at) if venue.visit_at else None,
         "stage": state.stage,
         "stage_label": state.stage_label,
@@ -535,6 +539,11 @@ def attachment_payload(
         "subject": message.subject,
         "received_at": iso_utc(message.occurred_at),
         "view_url": f"/api/documents/{attachment.id}/view",
+        "gdocs_url": (
+            f"/api/documents/{attachment.id}/gdocs"
+            if attachment.content_type == "application/pdf"
+            else None
+        ),
         "gmail_url": _gmail_url(message.gmail_thread_id, message, None, accounts),
         "gmail_account_email": _gmail_account_email(message, accounts),
     }

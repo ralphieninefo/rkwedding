@@ -127,6 +127,28 @@ def test_private_document_view_redirects_to_short_lived_spaces_url(
     assert response.status_code == 302
     assert response.headers["location"] == "https://private.example/signed"
 
+    gdocs = client.get("/api/documents/7/gdocs", follow_redirects=False)
+
+    assert gdocs.status_code == 302
+    assert gdocs.headers["location"] == (
+        "https://docs.google.com/viewer?url=https%3A%2F%2Fprivate.example%2Fsigned"
+    )
+
+
+def test_shortlist_move_route_validates_direction(monkeypatch) -> None:
+    def fake_move(venue_id, direction):
+        assert (venue_id, direction) == (13, "up")
+        return {"id": venue_id, "shortlist_rank": 1}
+
+    monkeypatch.setattr("app.db_workflow.move_shortlisted", fake_move)
+
+    response = client.post("/api/venues/13/shortlist-move", json={"direction": "up"})
+    assert response.status_code == 200
+    assert response.json()["shortlist_rank"] == 1
+
+    bad = client.post("/api/venues/13/shortlist-move", json={"direction": "sideways"})
+    assert bad.status_code == 422
+
 
 def test_saved_draft_can_be_sent(monkeypatch) -> None:
     async def fake_send(_settings, venue_id):

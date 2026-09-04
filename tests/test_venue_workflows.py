@@ -321,6 +321,35 @@ def test_update_venue_edits_fields_and_records_decisions(sessions) -> None:
     assert cleared["decision"] == ""
 
 
+def test_shortlisting_assigns_ranks_and_moves_swap_neighbours(sessions) -> None:
+    first = make_venue(sessions, name="First", email="first@villa.example")
+    second = make_venue(sessions, name="Second", email="second@villa.example")
+    third = make_venue(sessions, name="Third", email="third@villa.example")
+
+    assert db_workflow.update_venue(first, decision="shortlisted")["shortlist_rank"] == 1
+    assert db_workflow.update_venue(second, decision="shortlisted")["shortlist_rank"] == 2
+    assert db_workflow.update_venue(third, decision="shortlisted")["shortlist_rank"] == 3
+    # Re-shortlisting an already-shortlisted venue keeps its place.
+    assert db_workflow.update_venue(second, decision="shortlisted")["shortlist_rank"] == 2
+
+    moved = db_workflow.move_shortlisted(third, "up")
+    assert moved["shortlist_rank"] == 2
+    assert db_workflow.venue_detail(second)["shortlist_rank"] == 3
+    # Moving the top venue up is a harmless no-op.
+    assert db_workflow.move_shortlisted(first, "up")["shortlist_rank"] == 1
+
+    # Leaving the shortlist clears the rank; others keep their order.
+    assert db_workflow.update_venue(third, decision="passed")["shortlist_rank"] is None
+    assert db_workflow.move_shortlisted(second, "up")["shortlist_rank"] == 1
+
+    with pytest.raises(ValueError, match="shortlisted"):
+        db_workflow.move_shortlisted(third, "up")
+    with pytest.raises(ValueError, match="'up' or 'down'"):
+        db_workflow.move_shortlisted(first, "sideways")
+    with pytest.raises(ValueError, match="not found"):
+        db_workflow.move_shortlisted(999, "up")
+
+
 def test_update_venue_rejects_a_duplicate_email_and_bad_dates(sessions) -> None:
     first = make_venue(sessions, email="a@villa.example")
     make_venue(sessions, name="Other", email="b@villa.example")

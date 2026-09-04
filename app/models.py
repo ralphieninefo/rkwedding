@@ -222,6 +222,12 @@ class VenueUpdate(BaseModel):
     visit_at: str | None = Field(default=None, max_length=40)
 
 
+class ShortlistMove(BaseModel):
+    """One step up or down in the couple's shortlist ranking."""
+
+    direction: Literal["up", "down"]
+
+
 class PreferencesUpdate(BaseModel):
     """Couple-level settings such as the venue budget."""
 

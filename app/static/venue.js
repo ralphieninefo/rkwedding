@@ -239,6 +239,14 @@ const renderTimeline = () => {
       view.rel = "noopener";
       view.textContent = `📎 ${doc.filename}`;
       links.append(view);
+      if (doc.gdocs_url) {
+        const gdocs = document.createElement("a");
+        gdocs.href = doc.gdocs_url;
+        gdocs.target = "_blank";
+        gdocs.rel = "noopener";
+        gdocs.textContent = "Google Docs ↗";
+        links.append(gdocs);
+      }
     });
     if (message.gmail_url) {
       const open = document.createElement("a");
@@ -274,6 +282,14 @@ const renderDocuments = () => {
     view.rel = "noopener";
     view.textContent = "View";
     links.append(view);
+    if (doc.gdocs_url) {
+      const gdocs = document.createElement("a");
+      gdocs.href = doc.gdocs_url;
+      gdocs.target = "_blank";
+      gdocs.rel = "noopener";
+      gdocs.textContent = "Open in Google Docs";
+      links.append(gdocs);
+    }
     if (doc.gmail_url) {
       const open = document.createElement("a");
       open.href = doc.gmail_url;

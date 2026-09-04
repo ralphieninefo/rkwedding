@@ -25,6 +25,7 @@ from app.models import (
     PreferencesUpdate,
     PubSubEnvelope,
     ReplyDraftRequest,
+    ShortlistMove,
     VenueComparisonRequest,
     VenueComparisonResponse,
     VenueCreate,
@@ -227,6 +228,18 @@ async def update_venue_api(venue_id: int, update: VenueUpdate) -> dict[str, obje
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
+@app.post("/api/venues/{venue_id}/shortlist-move")
+async def shortlist_move_api(venue_id: int, move: ShortlistMove) -> dict[str, object]:
+    """Move a shortlisted venue one place up or down in the ranking."""
+    from app.db_workflow import move_shortlisted
+
+    try:
+        return await run_in_threadpool(move_shortlisted, venue_id, move.direction)
+    except ValueError as exc:
+        status_code = 404 if str(exc) == "Venue not found." else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
 @app.delete("/api/venues/{venue_id}")
 async def delete_venue_api(venue_id: int) -> dict[str, object]:
     """Delete a venue that has no Gmail history; otherwise it must be passed."""
@@ -357,8 +370,7 @@ async def venues_api() -> dict[str, object]:
     return await run_in_threadpool(_load)
 
 
-@app.get("/api/documents/{document_id}/view")
-async def view_document(document_id: int) -> RedirectResponse:
+async def _presigned_document_url(document_id: int) -> str:
     """Authorize the dashboard user, then issue a short-lived Spaces URL."""
     from botocore.exceptions import BotoCoreError, ClientError
 
@@ -380,7 +392,7 @@ async def view_document(document_id: int) -> RedirectResponse:
         content_type = attachment.content_type
     try:
         storage = SpacesStorage(settings)
-        url = await run_in_threadpool(
+        return await run_in_threadpool(
             storage.presigned_view_url,
             object_key=object_key,
             filename=filename,
@@ -391,7 +403,23 @@ async def view_document(document_id: int) -> RedirectResponse:
             status_code=502,
             detail="The private document link could not be created.",
         ) from exc
+
+
+@app.get("/api/documents/{document_id}/view")
+async def view_document(document_id: int) -> RedirectResponse:
+    """Redirect to a short-lived private link for the original file."""
+    url = await _presigned_document_url(document_id)
     return RedirectResponse(url, status_code=302)
+
+
+@app.get("/api/documents/{document_id}/gdocs")
+async def view_document_in_google_docs(document_id: int) -> RedirectResponse:
+    """Open the document in the Google Docs viewer — no conversion needed."""
+    from urllib.parse import quote
+
+    url = await _presigned_document_url(document_id)
+    viewer = f"https://docs.google.com/viewer?url={quote(url, safe='')}"
+    return RedirectResponse(viewer, status_code=302)
 
 
 @app.post("/api/venues")
