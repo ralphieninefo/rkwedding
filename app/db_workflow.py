@@ -9,6 +9,7 @@ import httpx
 from botocore.exceptions import BotoCoreError, ClientError
 from google.auth.exceptions import GoogleAuthError
 from sqlalchemy import or_, select
+from sqlalchemy.orm import selectinload
 
 from app.config import Settings
 from app.documents import NO_EMBEDDED_TEXT, attachment_text
@@ -1094,7 +1095,16 @@ def update_venue(venue_id: int, **fields: object) -> dict[str, object]:
 
 def venue_detail(venue_id: int) -> dict[str, object]:
     with SessionLocal() as session:
-        venue = session.get(Venue, venue_id)
+        venue = session.scalars(
+            select(Venue)
+            .where(Venue.id == venue_id)
+            .options(
+                selectinload(Venue.messages).selectinload(Message.attachments),
+                selectinload(Venue.outreach),
+                selectinload(Venue.attachments),
+                selectinload(Venue.estimate),
+            )
+        ).first()
         if venue is None:
             raise ValueError("Venue not found.")
         return venue_detail_payload(session, venue)
